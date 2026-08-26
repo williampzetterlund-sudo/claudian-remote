@@ -112,6 +112,59 @@ function resolveReadablePath(rawPath) {
   return null;
 }
 
+// Skriv-API: ENDAST .claudian-underträdet i vaulten (sessionsmetadata och
+// klientinställningar). Mobilklienter har ingen synkad kopia av dolda filer,
+// så värdens .claudian är enda sanningskällan. Resten av vaulten skrivs av
+// CLI:t — aldrig av klienten via detta API.
+const WRITE_ROOT = path.join(PATH_MAP_TO, '.claudian');
+
+function resolveWritablePath(rawPath) {
+  if (typeof rawPath !== 'string' || rawPath.length === 0) return null;
+  const resolved = path.resolve(rawPath);
+  // Lexikalisk gräns först (path.resolve har redan normaliserat ".."),
+  if (resolved !== WRITE_ROOT && !resolved.startsWith(WRITE_ROOT + path.sep)) return null;
+  // ...sedan symlänk-koll via närmaste existerande förfader: målet får inte
+  // finnas ännu (nya filer), men ingen länk på vägen får peka ut ur trädet.
+  const missing = [];
+  let probe = resolved;
+  while (!fsSync.existsSync(probe)) {
+    missing.unshift(path.basename(probe));
+    const parent = path.dirname(probe);
+    if (parent === probe) return null;
+    probe = parent;
+  }
+  let realProbe;
+  let realVault;
+  try {
+    realProbe = fsSync.realpathSync(probe);
+    realVault = fsSync.realpathSync(PATH_MAP_TO);
+  } catch {
+    return null;
+  }
+  const finalPath = missing.length > 0 ? path.join(realProbe, ...missing) : realProbe;
+  const realWriteRoot = path.join(realVault, '.claudian');
+  if (finalPath !== realWriteRoot && !finalPath.startsWith(realWriteRoot + path.sep)) return null;
+  return finalPath;
+}
+
+function readBody(req, limit = 32 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error('body too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, {
@@ -126,12 +179,75 @@ async function handleHttp(req, res) {
   // Via tunneln kommer sökvägen som /claudian-bridge/..., direkt som /...
   const route = url.pathname.replace(/^\/claudian-bridge(?=\/|$)/, '') || '/';
 
-  if (req.method !== 'GET') {
+  // CORS-preflight: mobilklientens origin (capacitor://localhost) skickar
+  // OPTIONS före POST beroende på content-type.
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': '*',
+      'Access-Control-Max-Age': '86400',
+    });
+    res.end();
+    return;
+  }
+  if (req.method !== 'GET' && req.method !== 'POST') {
     sendJson(res, 405, { error: 'method not allowed' });
     return;
   }
   if (!hasValidToken(req.url)) {
     sendJson(res, 401, { error: 'unauthorized' });
+    return;
+  }
+
+  const WRITE_ROUTES = new Set(['/fs/write', '/fs/append', '/fs/mkdir', '/fs/remove', '/fs/rmdir', '/fs/rename']);
+  if (WRITE_ROUTES.has(route)) {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'method not allowed' });
+      return;
+    }
+    const target = resolveWritablePath(url.searchParams.get('path'));
+    if (!target) {
+      sendJson(res, 403, { error: 'path outside writable scope' });
+      return;
+    }
+    try {
+      if (route === '/fs/write') {
+        const body = await readBody(req);
+        await fsPromises.mkdir(path.dirname(target), { recursive: true });
+        await fsPromises.writeFile(target, body);
+        sendJson(res, 200, { ok: true });
+      } else if (route === '/fs/append') {
+        const body = await readBody(req);
+        await fsPromises.mkdir(path.dirname(target), { recursive: true });
+        await fsPromises.appendFile(target, body);
+        sendJson(res, 200, { ok: true });
+      } else if (route === '/fs/mkdir') {
+        await fsPromises.mkdir(target, { recursive: true });
+        sendJson(res, 200, { ok: true });
+      } else if (route === '/fs/remove') {
+        await fsPromises.unlink(target);
+        sendJson(res, 200, { ok: true });
+      } else if (route === '/fs/rmdir') {
+        const recursive = url.searchParams.get('recursive') === '1';
+        await fsPromises.rm(target, { recursive, force: false });
+        sendJson(res, 200, { ok: true });
+      } else {
+        const destination = resolveWritablePath(url.searchParams.get('to'));
+        if (!destination) {
+          sendJson(res, 403, { error: 'destination outside writable scope' });
+          return;
+        }
+        await fsPromises.rename(target, destination);
+        sendJson(res, 200, { ok: true });
+      }
+    } catch (err) {
+      if (err && err.code === 'ENOENT') {
+        sendJson(res, 404, { error: 'not found' });
+      } else {
+        sendJson(res, 500, { error: err && err.message ? err.message : 'write failed' });
+      }
+    }
     return;
   }
 

@@ -10,6 +10,14 @@ import * as path from 'node:path';
 
 import type { App, DataAdapter } from 'obsidian';
 
+import {
+  isIgnisRuntime,
+  isRemoteRuntime,
+} from '../../providers/claude/runtime/remoteSpawn';
+import { BridgeDataAdapter } from './BridgeDataAdapter';
+
+let sharedBridgeAdapter: BridgeDataAdapter | null = null;
+
 export type ManagedResourceType = 'file' | 'folder';
 
 export interface ManagedPathVerificationOptions {
@@ -92,6 +100,13 @@ export class VaultFileAdapter {
   constructor(private app: App) {}
 
   private get adapter(): DataAdapter {
+    // Non-Ignis remote runtimes (Obsidian mobile, desktop bridge opt-in) share
+    // .claudian/ with the HOST through the bridge: hidden files do not travel
+    // through vault sync, and the CLI-side state lives on the host anyway.
+    if (isRemoteRuntime() && !isIgnisRuntime()) {
+      sharedBridgeAdapter ??= new BridgeDataAdapter();
+      return sharedBridgeAdapter;
+    }
     return this.app.vault.adapter;
   }
 
@@ -101,16 +116,16 @@ export class VaultFileAdapter {
   }
 
   async exists(path: string): Promise<boolean> {
-    return this.app.vault.adapter.exists(path);
+    return this.adapter.exists(path);
   }
 
   async read(path: string): Promise<string> {
-    return this.app.vault.adapter.read(path);
+    return this.adapter.read(path);
   }
 
   async write(path: string, content: string): Promise<void> {
     await this.ensureParentFolder(path);
-    await this.app.vault.adapter.write(path, content);
+    await this.adapter.write(path, content);
   }
 
   async append(path: string, content: string): Promise<void> {
@@ -118,9 +133,9 @@ export class VaultFileAdapter {
     this.writeQueue = this.writeQueue.then(async () => {
       if (await this.exists(path)) {
         const existing = await this.read(path);
-        await this.app.vault.adapter.write(path, existing + content);
+        await this.adapter.write(path, existing + content);
       } else {
-        await this.app.vault.adapter.write(path, content);
+        await this.adapter.write(path, content);
       }
     }).catch(() => {
       // prevent queue from getting stuck
@@ -130,7 +145,7 @@ export class VaultFileAdapter {
 
   async delete(path: string): Promise<void> {
     if (await this.exists(path)) {
-      await this.app.vault.adapter.remove(path);
+      await this.adapter.remove(path);
     }
   }
 
@@ -138,7 +153,7 @@ export class VaultFileAdapter {
   async deleteFolder(path: string): Promise<void> {
     try {
       if (await this.exists(path)) {
-        await this.app.vault.adapter.rmdir(path, false);
+        await this.adapter.rmdir(path, false);
       }
     } catch {
       // Non-critical: directory may not be empty
@@ -149,7 +164,7 @@ export class VaultFileAdapter {
     if (!(await this.exists(folder))) {
       return [];
     }
-    const listing = await this.app.vault.adapter.list(folder);
+    const listing = await this.adapter.list(folder);
     return listing.files;
   }
 
@@ -158,7 +173,7 @@ export class VaultFileAdapter {
     if (!(await this.exists(folder))) {
       return [];
     }
-    const listing = await this.app.vault.adapter.list(folder);
+    const listing = await this.adapter.list(folder);
     return listing.folders;
   }
 
@@ -169,7 +184,7 @@ export class VaultFileAdapter {
     const processFolder = async (currentFolder: string) => {
       if (!(await this.exists(currentFolder))) return;
 
-      const listing = await this.app.vault.adapter.list(currentFolder);
+      const listing = await this.adapter.list(currentFolder);
       allFiles.push(...listing.files);
 
       for (const subfolder of listing.folders) {
@@ -214,7 +229,7 @@ export class VaultFileAdapter {
 
     const creation = (async () => {
       try {
-        await this.app.vault.adapter.mkdir(path);
+        await this.adapter.mkdir(path);
       } catch (error) {
         if (!(await this.exists(path))) {
           throw error;
@@ -233,7 +248,7 @@ export class VaultFileAdapter {
 
   /** Rename/move a file. */
   async rename(oldPath: string, newPath: string): Promise<void> {
-    await this.app.vault.adapter.rename(oldPath, newPath);
+    await this.adapter.rename(oldPath, newPath);
   }
 
   async verifyManagedPath(
@@ -654,7 +669,7 @@ export class VaultFileAdapter {
 
   async stat(path: string): Promise<{ mtime: number; size: number } | null> {
     try {
-      const stat = await this.app.vault.adapter.stat(path);
+      const stat = await this.adapter.stat(path);
       if (!stat) return null;
       return { mtime: stat.mtime, size: stat.size };
     } catch {

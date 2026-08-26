@@ -179,6 +179,18 @@ export function getIgnisBridgeConfig(): IgnisBridgeConfig | null {
   return cachedBridgeConfig;
 }
 
+/**
+ * Resolves the bridge config, waiting for the in-flight fetch (or starting
+ * one) when needed. Returns null outside configured remote runtimes.
+ */
+export async function getBridgeConfigAsync(): Promise<IgnisBridgeConfig | null> {
+  if (cachedBridgeConfig) return cachedBridgeConfig;
+  if (!isRemoteRuntime() || !isBridgeConfigured()) return null;
+  if (!bridgeConfigRequest) ensureIgnisBridgeConfig();
+  if (bridgeConfigRequest) await bridgeConfigRequest;
+  return cachedBridgeConfig;
+}
+
 function makeFsUrl(op: 'stat' | 'readdir' | 'read', targetPath: string): string {
   const url = resolveBridgeHttpUrl(`/fs/${op}`);
   const separator = url.includes('?') ? '&' : '?';

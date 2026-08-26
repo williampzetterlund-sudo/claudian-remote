@@ -79,6 +79,13 @@ Client → server: `start {args, cwd, env}` · `attach {sessionId, sinceSeq}` ·
 `stdin {data:base64}` · `stdin_end` · `kill {signal}` · `ping` ·
 `clientlog {message}`
 
+HTTP (GET): `/config` · `/fs/stat|readdir|read?path=` (paths under the
+declared read roots). HTTP (POST, scoped to the vault's `.claudian/` subtree
+— session metadata and client settings): `/fs/write|append?path=` (body =
+content) · `/fs/mkdir|remove?path=` · `/fs/rmdir?path=&recursive=1` ·
+`/fs/rename?path=&to=`. Mobile clients share `.claudian/` with the host this
+way, since hidden files do not travel through vault sync.
+
 Server → client: `started {pid, attached?, sessionId?, seq?}` ·
 `session {sessionId}` · `stdout|stderr {data:base64, seq}` ·
 `exit {code, signal}` · `attach_failed {message}` · `pong` · `error {message}`
