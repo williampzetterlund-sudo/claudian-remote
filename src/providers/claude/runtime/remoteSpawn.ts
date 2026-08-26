@@ -366,6 +366,7 @@ class RemoteReadable extends MiniEmitter {
 
 type BridgeClientMessage =
   | { type: 'start'; args: string[]; cwd?: string; env?: Record<string, string | undefined> }
+  | { type: 'attach'; sessionId: string; sinceSeq: number }
   | { type: 'stdin'; data: string }
   | { type: 'stdin_end' }
   | { type: 'kill'; signal: string }
@@ -379,6 +380,19 @@ type BridgeClientMessage =
  */
 export const IGNIS_BRIDGE_KEEPALIVE_INTERVAL_MS = 30_000;
 
+/**
+ * Mobile webviews (Obsidian iOS) drop the WebSocket every time the app is
+ * backgrounded, while the CLI process stays alive on the bridge. The facade
+ * reconnects with an `attach` frame carrying the highest output seq it has
+ * seen; the bridge replays what was missed. Attempts back off exponentially
+ * (timers freeze while backgrounded, so attempts only burn in the foreground)
+ * and a visibilitychange listener short-circuits the backoff on return.
+ */
+export const IGNIS_BRIDGE_MAX_RECONNECT_ATTEMPTS = 20;
+export const IGNIS_BRIDGE_RECONNECT_BASE_DELAY_MS = 500;
+export const IGNIS_BRIDGE_RECONNECT_MAX_DELAY_MS = 15_000;
+export const IGNIS_BRIDGE_PONG_TIMEOUT_MS = 8_000;
+
 interface BridgeServerMessage {
   type?: string;
   pid?: number;
@@ -386,6 +400,9 @@ interface BridgeServerMessage {
   code?: number | null;
   signal?: string | null;
   message?: string;
+  seq?: number;
+  sessionId?: string;
+  attached?: boolean;
 }
 
 class RemoteSpawnedProcess extends MiniEmitter {
@@ -418,6 +435,13 @@ class RemoteSpawnedProcess extends MiniEmitter {
   private stdinEnded = false;
   private readonly stdoutDecoder = new TextDecoder('utf-8');
   private readonly stderrDecoder = new TextDecoder('utf-8');
+  private sessionId: string | null = null;
+  private lastSeq = 0;
+  private currentConnectMode: 'start' | 'attach' = 'start';
+  private reconnectAttempts = 0;
+  private reconnectTimer: number | undefined;
+  private pongTimer: number | undefined;
+  private visibilityHandler: (() => void) | null = null;
 
   constructor(private readonly options: SpawnOptions) {
     super();
@@ -456,7 +480,17 @@ class RemoteSpawnedProcess extends MiniEmitter {
       removeListener: (event, listener) => stdinEmitter.off(event, listener),
     };
 
-    this.socket = this.connect();
+    this.socket = this.connect('start');
+
+    // Mobil-backgrounding fryser JS och kan lämna socketen halvdöd. När appen
+    // blir synlig igen: hoppa över kvarvarande backoff, eller hälsokolla en
+    // till synes öppen socket med ping + pong-deadline.
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      this.visibilityHandler = () => {
+        if (document.visibilityState === 'visible') this.onForeground();
+      };
+      document.addEventListener('visibilitychange', this.visibilityHandler);
+    }
 
     const signal = options.signal;
     if (signal) {
@@ -500,15 +534,24 @@ class RemoteSpawnedProcess extends MiniEmitter {
     return true;
   }
 
-  private connect(): WebSocket {
+  private connect(mode: 'start' | 'attach'): WebSocket {
+    this.currentConnectMode = mode;
     const socket = new WebSocket(resolveBridgeUrl());
     socket.onopen = () => {
-      socket.send(JSON.stringify({
-        type: 'start',
-        args: [...this.options.args],
-        cwd: this.options.cwd,
-        env: this.options.env,
-      } satisfies BridgeClientMessage));
+      if (mode === 'attach') {
+        socket.send(JSON.stringify({
+          type: 'attach',
+          sessionId: this.sessionId ?? '',
+          sinceSeq: this.lastSeq,
+        } satisfies BridgeClientMessage));
+      } else {
+        socket.send(JSON.stringify({
+          type: 'start',
+          args: [...this.options.args],
+          cwd: this.options.cwd,
+          env: this.options.env,
+        } satisfies BridgeClientMessage));
+      }
       this.started = true;
       // The viewport identifies which remote device a bridge-journal entry
       // came from (phone vs. desktop); the browser side has no other channel.
@@ -517,7 +560,7 @@ class RemoteSpawnedProcess extends MiniEmitter {
         : 'unknown';
       socket.send(JSON.stringify({
         type: 'clientlog',
-        message: `spawned viewport=${viewport}`,
+        message: `${mode === 'attach' ? `reattached (attempt ${this.reconnectAttempts})` : 'spawned'} viewport=${viewport}`,
       } satisfies BridgeClientMessage));
       for (const frame of this.pendingFrames.splice(0)) {
         socket.send(JSON.stringify(frame));
@@ -535,21 +578,126 @@ class RemoteSpawnedProcess extends MiniEmitter {
       // Details arrive via onclose; browsers expose nothing useful here.
     };
     socket.onclose = () => {
-      if (this.keepaliveTimer !== undefined) {
-        window.clearInterval(this.keepaliveTimer);
-        this.keepaliveTimer = undefined;
-      }
-      if (this.exited) return;
-      this.exited = true;
-      this.currentSignalCode = 'SIGTERM';
-      this.emit('error', new Error(
-        'Claudian bridge: connection closed before the process exited'
-        + (this.stderrTail ? `\nstderr: ${this.stderrTail.slice(-2000)}` : ''),
-      ));
-      this.stdout.finish();
-      this.emit('exit', null, 'SIGTERM');
+      this.handleSocketClose();
     };
     return socket;
+  }
+
+  private handleSocketClose(): void {
+    if (this.keepaliveTimer !== undefined) {
+      window.clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = undefined;
+    }
+    this.clearPongTimer();
+    if (this.exited) return;
+    // A live server-side session survives the connection: reconnect instead
+    // of tearing down. Without a sessionId (one-shot query, or init never
+    // arrived) there is nothing to reattach to — fail like before.
+    if (!this.wasKilled && this.sessionId) {
+      this.diagnostic('socket lost with live session; scheduling reattach');
+      this.scheduleReconnect();
+      return;
+    }
+    this.finalizeLostConnection();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer !== undefined || this.exited) return;
+    this.reconnectAttempts += 1;
+    if (this.reconnectAttempts > IGNIS_BRIDGE_MAX_RECONNECT_ATTEMPTS) {
+      this.finalizeLostConnection(
+        `Claudian bridge: gave up reconnecting after ${IGNIS_BRIDGE_MAX_RECONNECT_ATTEMPTS} attempts`,
+      );
+      return;
+    }
+    const delay = Math.min(
+      IGNIS_BRIDGE_RECONNECT_BASE_DELAY_MS * 2 ** (this.reconnectAttempts - 1),
+      IGNIS_BRIDGE_RECONNECT_MAX_DELAY_MS,
+    );
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (this.exited) return;
+      this.socket = this.connect('attach');
+    }, delay);
+  }
+
+  private onForeground(): void {
+    if (this.exited || this.wasKilled) return;
+    if (this.reconnectTimer !== undefined) {
+      // The user is back — skip the remaining backoff.
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+      this.socket = this.connect('attach');
+      return;
+    }
+    if (this.socket.readyState === 1) {
+      // The socket may be half-dead after a suspend: ping with a deadline;
+      // a missing pong forces close → handleSocketClose → reattach.
+      try {
+        this.socket.send(JSON.stringify({ type: 'ping' } satisfies BridgeClientMessage));
+      } catch {
+        return;
+      }
+      this.clearPongTimer();
+      this.pongTimer = window.setTimeout(() => {
+        this.pongTimer = undefined;
+        this.diagnostic('no pong after foreground; forcing socket close');
+        try {
+          this.socket.close();
+        } catch {
+          // Already closed.
+        }
+      }, IGNIS_BRIDGE_PONG_TIMEOUT_MS);
+    }
+  }
+
+  private clearPongTimer(): void {
+    if (this.pongTimer !== undefined) {
+      window.clearTimeout(this.pongTimer);
+      this.pongTimer = undefined;
+    }
+  }
+
+  private cleanupListeners(): void {
+    if (this.keepaliveTimer !== undefined) {
+      window.clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = undefined;
+    }
+    if (this.reconnectTimer !== undefined) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    this.clearPongTimer();
+    if (this.visibilityHandler && typeof document !== 'undefined'
+      && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
+  }
+
+  private finalizeLostConnection(detail?: string): void {
+    if (this.exited) return;
+    this.exited = true;
+    this.currentSignalCode = 'SIGTERM';
+    this.cleanupListeners();
+    this.emit('error', new Error(
+      (detail ?? 'Claudian bridge: connection closed before the process exited')
+      + (this.stderrTail ? `\nstderr: ${this.stderrTail.slice(-2000)}` : ''),
+    ));
+    this.stdout.finish();
+    this.emit('exit', null, 'SIGTERM');
+  }
+
+  /**
+   * Drops duplicate output after a reattach: the bridge replays frames with
+   * seq > sinceSeq, but a frame can race the attach handshake. Old bridges
+   * send no seq — then nothing is filtered.
+   */
+  private isDuplicateFrame(message: BridgeServerMessage): boolean {
+    if (typeof message.seq !== 'number') return false;
+    if (message.seq <= this.lastSeq) return true;
+    this.lastSeq = message.seq;
+    return false;
   }
 
   private sendOrQueue(frame: BridgeClientMessage): void {
@@ -571,13 +719,41 @@ class RemoteSpawnedProcess extends MiniEmitter {
     switch (message.type) {
       case 'started':
         this.pid = message.pid;
+        if (typeof message.sessionId === 'string' && message.sessionId) {
+          this.sessionId = message.sessionId;
+        }
+        // On a warm start-attach (SDK-level --resume) the seq baseline stops
+        // a later reattach from replaying output sent before this client
+        // existed. On reattach the baseline is this client's own lastSeq.
+        if (this.currentConnectMode === 'start' && typeof message.seq === 'number') {
+          this.lastSeq = message.seq;
+        }
+        this.reconnectAttempts = 0;
+        break;
+      case 'session':
+        if (typeof message.sessionId === 'string' && message.sessionId) {
+          this.sessionId = message.sessionId;
+        }
+        break;
+      case 'pong':
+        this.clearPongTimer();
+        break;
+      case 'attach_failed':
+        // The process is gone on the bridge (reaped or crashed). Fail like a
+        // lost connection: Claudian's next message recovers via --resume.
+        this.diagnostic(`attach failed: ${message.message ?? 'unknown'}`);
+        this.finalizeLostConnection(
+          `Claudian bridge: ${message.message ?? 'process no longer available'}`,
+        );
         break;
       case 'stdout':
+        if (this.isDuplicateFrame(message)) break;
         this.stdout.pushText(
           this.stdoutDecoder.decode(decodeBase64(message.data ?? ''), { stream: true }),
         );
         break;
       case 'stderr': {
+        if (this.isDuplicateFrame(message)) break;
         const text = this.stderrDecoder.decode(decodeBase64(message.data ?? ''), { stream: true });
         this.stderrTail = (this.stderrTail + text).slice(-8000);
         break;
@@ -587,6 +763,7 @@ class RemoteSpawnedProcess extends MiniEmitter {
         this.exited = true;
         this.currentExitCode = typeof message.code === 'number' ? message.code : null;
         this.currentSignalCode = message.signal ?? null;
+        this.cleanupListeners();
         this.stdout.pushText(this.stdoutDecoder.decode());
         this.stdout.finish();
         this.emit('exit', this.currentExitCode, this.currentSignalCode);

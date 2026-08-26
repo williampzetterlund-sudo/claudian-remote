@@ -6,6 +6,8 @@ import { createCustomSpawnFunction } from '@/providers/claude/runtime/customSpaw
 import {
   createRemoteSpawnFunction,
   getIgnisHostPath,
+  IGNIS_BRIDGE_MAX_RECONNECT_ATTEMPTS,
+  IGNIS_BRIDGE_RECONNECT_MAX_DELAY_MS,
   IGNIS_BRIDGE_URL_STORAGE_KEY,
   isIgnisRuntime,
   resolveBridgeHttpUrl,
@@ -400,6 +402,183 @@ describe('remoteSpawn', () => {
 
       expect(onceExits).toEqual([0]);
       expect(removed).toEqual([]);
+    });
+  });
+
+  describe('reconnect with attach and replay', () => {
+    it('reattaches with sessionId and sinceSeq after an abnormal close', () => {
+      jest.useFakeTimers();
+      try {
+        createRemoteSpawnFunction()(spawnOptions());
+        const first = FakeWebSocket.instances[0];
+        first.open();
+        first.receive({ type: 'session', sessionId: 'sess-1' });
+        first.receive({ type: 'stdout', seq: 1, data: utf8ToBase64('a\n') });
+        first.receive({ type: 'stdout', seq: 2, data: utf8ToBase64('b\n') });
+
+        first.dropConnection();
+        expect(FakeWebSocket.instances).toHaveLength(1);
+        jest.advanceTimersByTime(500);
+        expect(FakeWebSocket.instances).toHaveLength(2);
+
+        const second = FakeWebSocket.instances[1];
+        second.open();
+        expect(second.protocolMessages()[0]).toEqual({
+          type: 'attach',
+          sessionId: 'sess-1',
+          sinceSeq: 2,
+        });
+        second.receive({ type: 'exit', code: 0, signal: null });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not emit error or synthetic exit while a reattach is pending', () => {
+      jest.useFakeTimers();
+      try {
+        const process = createRemoteSpawnFunction()(spawnOptions());
+        const errors: Error[] = [];
+        const exits: Array<number | null> = [];
+        process.on('error', (error: Error) => errors.push(error));
+        process.on('exit', (code: number | null) => exits.push(code));
+
+        const first = FakeWebSocket.instances[0];
+        first.open();
+        first.receive({ type: 'session', sessionId: 'sess-2' });
+        first.dropConnection();
+
+        expect(errors).toEqual([]);
+        expect(exits).toEqual([]);
+
+        jest.advanceTimersByTime(500);
+        FakeWebSocket.instances[1].open();
+        FakeWebSocket.instances[1].receive({ type: 'exit', code: 0, signal: null });
+        expect(exits).toEqual([0]);
+        expect(errors).toEqual([]);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('drops replayed frames it has already seen, keeps new ones', () => {
+      jest.useFakeTimers();
+      try {
+        const process = createRemoteSpawnFunction()(spawnOptions());
+        const chunks: string[] = [];
+        (process.stdout as unknown as { on(event: string, cb: (data: string) => void): void })
+          .on('data', (data: string) => chunks.push(data));
+
+        const first = FakeWebSocket.instances[0];
+        first.open();
+        first.receive({ type: 'session', sessionId: 'sess-3' });
+        first.receive({ type: 'stdout', seq: 1, data: utf8ToBase64('ett\n') });
+        first.dropConnection();
+
+        jest.advanceTimersByTime(500);
+        const second = FakeWebSocket.instances[1];
+        second.open();
+        // Bryggan replayar från sinceSeq, men en frame kan hinna dubbleras.
+        second.receive({ type: 'stdout', seq: 1, data: utf8ToBase64('ett\n') });
+        second.receive({ type: 'stdout', seq: 2, data: utf8ToBase64('två\n') });
+
+        expect(chunks.join('')).toBe('ett\ntvå\n');
+        second.receive({ type: 'exit', code: 0, signal: null });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('baselines sinceSeq from a warm start-attach so old output is not replayed', () => {
+      jest.useFakeTimers();
+      try {
+        createRemoteSpawnFunction()(spawnOptions());
+        const first = FakeWebSocket.instances[0];
+        first.open();
+        first.receive({ type: 'started', pid: 7, attached: true, sessionId: 'sess-4', seq: 42 });
+        first.dropConnection();
+
+        jest.advanceTimersByTime(500);
+        const second = FakeWebSocket.instances[1];
+        second.open();
+        expect(second.protocolMessages()[0]).toEqual({
+          type: 'attach',
+          sessionId: 'sess-4',
+          sinceSeq: 42,
+        });
+        second.receive({ type: 'exit', code: 0, signal: null });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('tears down with error and synthetic exit when attach fails', () => {
+      jest.useFakeTimers();
+      try {
+        const process = createRemoteSpawnFunction()(spawnOptions());
+        const errors: Error[] = [];
+        const exits: Array<[number | null, string | null]> = [];
+        process.on('error', (error: Error) => errors.push(error));
+        process.on('exit', (code: number | null, signal: string | null) => exits.push([code, signal]));
+
+        const first = FakeWebSocket.instances[0];
+        first.open();
+        first.receive({ type: 'session', sessionId: 'sess-5' });
+        first.dropConnection();
+
+        jest.advanceTimersByTime(500);
+        const second = FakeWebSocket.instances[1];
+        second.open();
+        second.receive({ type: 'attach_failed', message: 'ingen levande process' });
+
+        expect(errors).toHaveLength(1);
+        expect(errors[0].message).toContain('ingen levande process');
+        expect(exits).toEqual([[null, 'SIGTERM']]);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('gives up after the max number of reconnect attempts', () => {
+      jest.useFakeTimers();
+      try {
+        const process = createRemoteSpawnFunction()(spawnOptions());
+        const errors: Error[] = [];
+        process.on('error', (error: Error) => errors.push(error));
+        process.on('exit', () => {});
+
+        const first = FakeWebSocket.instances[0];
+        first.open();
+        first.receive({ type: 'session', sessionId: 'sess-6' });
+        first.dropConnection();
+
+        for (let attempt = 0; attempt < IGNIS_BRIDGE_MAX_RECONNECT_ATTEMPTS; attempt += 1) {
+          jest.advanceTimersByTime(IGNIS_BRIDGE_RECONNECT_MAX_DELAY_MS);
+          const latest = FakeWebSocket.instances[FakeWebSocket.instances.length - 1];
+          if (latest.readyState !== 3) latest.dropConnection();
+        }
+        jest.advanceTimersByTime(IGNIS_BRIDGE_RECONNECT_MAX_DELAY_MS);
+
+        expect(FakeWebSocket.instances).toHaveLength(1 + IGNIS_BRIDGE_MAX_RECONNECT_ATTEMPTS);
+        expect(errors).toHaveLength(1);
+        expect(errors[0].message).toContain('gave up reconnecting');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('keeps the old teardown for sessions the bridge never identified', () => {
+      const process = createRemoteSpawnFunction()(spawnOptions());
+      const errors: Error[] = [];
+      process.on('error', (error: Error) => errors.push(error));
+      process.on('exit', () => {});
+
+      const socket = FakeWebSocket.instances[0];
+      socket.open();
+      socket.dropConnection();
+
+      expect(errors).toHaveLength(1);
+      expect(FakeWebSocket.instances).toHaveLength(1);
     });
   });
 
