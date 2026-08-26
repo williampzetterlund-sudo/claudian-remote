@@ -1,0 +1,14 @@
+[Unit]
+Description=Claudian Ignis bridge (WebSocket -> Claude CLI)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/claudian-ignis/bridge
+EnvironmentFile=%h/claudian-ignis/bridge/.env
+ExecStart=%h/.local/bin/node %h/claudian-ignis/bridge/server.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

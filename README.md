@@ -1,4 +1,13 @@
-# Claudian
+# Claudian (remote fork)
+
+> [!NOTE]
+> **This is a fork** of [YishenTu/claudian](https://github.com/YishenTu/claudian)
+> that adds **Obsidian mobile (iOS/Android) and browser support**: the Claude
+> Code CLI runs on a host machine behind a WebSocket bridge, and the plugin
+> becomes a thin streaming client. Install on mobile via BRAT →
+> `williampzetterlund-sudo/claudian-remote`. See **[REMOTE.md](REMOTE.md)**
+> for architecture and setup, and [`bridge/`](bridge/) for the host-side
+> server. Everything below is the upstream README.
 
 <p>
   <a href="https://trendshift.io/repositories/21115?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-21115">

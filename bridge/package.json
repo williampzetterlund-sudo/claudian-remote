@@ -1,0 +1,13 @@
+{
+  "name": "claudian-bridge",
+  "version": "1.0.0",
+  "description": "WebSocket bridge that runs the Claude CLI on a host for remote Claudian clients (Obsidian mobile, Obsidian-in-browser)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}

@@ -1,86 +1,52 @@
-name: Release
+name: Release (remote build)
 
 on:
   push:
     tags:
-      - '*'
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
 
 jobs:
-  verify:
-    permissions:
-      contents: read
-    uses: ./.github/workflows/ci.yml
-
   release:
-    needs: verify
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history for changelog generation
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version-file: .node-version
-          cache: 'npm'
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate release version
-        run: node scripts/check-release-version.mjs "${{ github.ref_name }}"
+      - name: Build styles
+        run: node scripts/build-css.mjs
 
-      - name: Build
-        run: npm run build && npm run check:performance
+      - name: Build browser bundle (no token baked)
+        run: node esbuild.ignis.mjs dist
 
-      - name: Generate artifact attestations
-        uses: actions/attest@v4
-        with:
-          subject-path: |
-            main.js
-            manifest.json
-            styles.css
-
-      - name: Get previous tag
-        id: prev_tag
+      - name: Sanity-check artifacts
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          echo "tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('dist/manifest.json', 'utf8'));
+            if (manifest.isDesktopOnly !== false) throw new Error('isDesktopOnly must be false');
+            if (manifest.version !== process.env.GITHUB_REF_NAME) {
+              throw new Error('manifest version ' + manifest.version + ' != tag ' + process.env.GITHUB_REF_NAME);
+            }
+            const bundle = fs.readFileSync('dist/main.js', 'utf8');
+            if (!bundle.includes('CLAUDIAN')) throw new Error('bundle looks wrong');
+            console.log('manifest', manifest.version, 'minAppVersion', manifest.minAppVersion, 'bundle', (bundle.length/1e6).toFixed(1) + ' MB');
+          "
 
-      - name: Generate changelog
-        id: changelog
+      - name: Create release
         env:
-          PREVIOUS_TAG: ${{ steps.prev_tag.outputs.tag }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "$PREVIOUS_TAG" ]; then
-            CHANGELOG=$(git log "$PREVIOUS_TAG..HEAD" --pretty=format:"- %s" --no-merges | grep -Fvx -- "- $RELEASE_TAG" || true)
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges | head -20)
-          fi
-          {
-            echo "notes<<EOF"
-            echo "$CHANGELOG"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body: |
-            ## What's Changed
-            ${{ steps.changelog.outputs.notes }}
-
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.prev_tag.outputs.tag }}...${{ github.ref_name }}
-          files: |
-            main.js
-            manifest.json
-            styles.css
+          gh release create "$GITHUB_REF_NAME" \
+            dist/main.js dist/manifest.json dist/styles.css \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Browser/remote build (Obsidian mobile via BRAT + Obsidian-in-browser). Requires a running claudian-bridge — see bridge/README.md and REMOTE.md."
