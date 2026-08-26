@@ -631,6 +631,25 @@
       "name": "최대 동시 실행 세션 수",
       "desc": "동시에 준비 상태로 유지할 에이전트 세션의 최대 수(5-10). 오래된 유휴 세션은 자동으로 일시 중지되고 사용할 때 재개됩니다."
     },
+    "bridge": {
+      "command": "원격 브리지 설정",
+      "heading": "원격 브리지",
+      "url": {
+        "name": "브리지 URL",
+        "desc": "원격 호스트에서 CLI를 실행하는 Claudian 브리지의 WebSocket URL (예: wss://bridge.example.com). 모바일에서는 필수, 그 외에는 선택 사항. 이 기기에만 저장되며 동기화되지 않습니다."
+      },
+      "token": {
+        "name": "브리지 토큰",
+        "desc": "브리지 인증 토큰. 이 기기에만 저장되며 동기화되지 않습니다."
+      },
+      "test": {
+        "name": "연결 테스트",
+        "desc": "위의 URL과 토큰으로 브리지의 /config 엔드포인트를 가져옵니다.",
+        "button": "테스트",
+        "ok": "브리지 정상 — Vault 루트: {vaultRoot}",
+        "fail": "브리지 연결 실패"
+      }
+    },
     "collabGitInstallation": {
       "summary": "Git 설정 도움말",
       "requirement": "Claudian Collab은 이 컴퓨터에 설치된 Native Git 2.38 이상을 사용합니다.",

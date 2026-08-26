@@ -631,6 +631,25 @@
       "name": "Maximum de sessions exécutées simultanément",
       "desc": "Nombre maximal de sessions d'agent gardées prêtes à la fois (5-10). Les anciennes sessions inactives se mettent automatiquement en pause et reprennent à l'utilisation."
     },
+    "bridge": {
+      "command": "Configurer le pont distant",
+      "heading": "Pont distant",
+      "url": {
+        "name": "URL du pont",
+        "desc": "URL WebSocket du pont Claudian qui exécute la CLI sur un hôte distant (p. ex. wss://bridge.example.com). Requis sur mobile ; optionnel ailleurs. Stocké uniquement sur cet appareil — jamais synchronisé."
+      },
+      "token": {
+        "name": "Jeton du pont",
+        "desc": "Jeton d'authentification du pont. Stocké uniquement sur cet appareil — jamais synchronisé."
+      },
+      "test": {
+        "name": "Tester la connexion",
+        "desc": "Interroge le point de terminaison /config du pont avec l'URL et le jeton ci-dessus.",
+        "button": "Tester",
+        "ok": "Pont OK — racine du coffre : {vaultRoot}",
+        "fail": "Échec de connexion au pont"
+      }
+    },
     "collabGitInstallation": {
       "summary": "Aide à la configuration de Git",
       "requirement": "Claudian Collab utilise Native Git 2.38 ou une version ultérieure installée sur cet ordinateur.",

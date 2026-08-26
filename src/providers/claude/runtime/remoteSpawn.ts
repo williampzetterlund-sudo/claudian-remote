@@ -1,4 +1,5 @@
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
+import { Platform } from 'obsidian';
 
 /**
  * Browser-side SpawnedProcess implementation for the Ignis runtime.
@@ -59,6 +60,56 @@ function readRecentAbortLog(): string {
 
 export function isIgnisRuntime(): boolean {
   return typeof window !== 'undefined' && !!(window as IgnisWindow).__ignis;
+}
+
+/**
+ * True when the CLI must run on the bridge host instead of being spawned
+ * locally: under Ignis (browser), on Obsidian mobile (Capacitor has no
+ * child_process), or when the user explicitly configured a bridge URL
+ * (desktop opt-in).
+ */
+export function isRemoteRuntime(): boolean {
+  if (isIgnisRuntime()) return true;
+  if (Platform.isMobileApp) return true;
+  return hasBridgeOverride();
+}
+
+/** True when a bridge URL is explicitly configured on this device. */
+export function hasBridgeOverride(): boolean {
+  return !!readLocalStorage(IGNIS_BRIDGE_URL_STORAGE_KEY);
+}
+
+/**
+ * True when spawning through the bridge can plausibly work: Ignis derives a
+ * same-origin default, every other remote runtime needs an explicit URL.
+ */
+export function isBridgeConfigured(): boolean {
+  return isIgnisRuntime() || hasBridgeOverride();
+}
+
+export class BridgeNotConfiguredError extends Error {
+  constructor() {
+    super(
+      'Claudian bridge: no bridge URL is configured on this device. '
+      + 'Open Settings → Claudian → Remote bridge and enter the bridge URL and token.',
+    );
+    this.name = 'BridgeNotConfiguredError';
+  }
+}
+
+/** Safe localStorage reads/writes shared with the settings UI. */
+export function readBridgeSetting(key: string): string | null {
+  return readLocalStorage(key);
+}
+
+export function writeBridgeSetting(key: string, value: string | null): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Storage unavailable; the setting simply does not persist.
+  }
 }
 
 function readLocalStorage(key: string): string | null {
@@ -140,20 +191,35 @@ function makeFsUrl(op: 'stat' | 'readdir' | 'read', targetPath: string): string 
  * window.__claudianBridgeConfig; failure only degrades history replay.
  */
 export function ensureIgnisBridgeConfig(): void {
-  if (!isIgnisRuntime() || cachedBridgeConfig || bridgeConfigRequest) return;
+  if (!isRemoteRuntime() || !isBridgeConfigured()) return;
+  if (cachedBridgeConfig || bridgeConfigRequest) return;
   bridgeConfigRequest = (async () => {
     try {
-      const response = await fetch(resolveBridgeHttpUrl('/config'));
-      if (!response.ok) return;
-      const config = (await response.json()) as IgnisBridgeConfig;
-      cachedBridgeConfig = config;
-      (window as IgnisWindow).__claudianBridgeConfig = { ...config, makeFsUrl };
+      await refreshBridgeConfig();
     } catch {
       // Bridge unreachable; spawning will surface its own error later.
     } finally {
       bridgeConfigRequest = null;
     }
   })();
+}
+
+/**
+ * Fetches /config unconditionally (bypassing the cache) and installs the
+ * result. Used by the settings "test connection" button after the user edits
+ * the URL or token, and internally by ensureIgnisBridgeConfig.
+ */
+export async function refreshBridgeConfig(): Promise<IgnisBridgeConfig> {
+  const response = await fetch(resolveBridgeHttpUrl('/config'));
+  if (!response.ok) {
+    throw new Error(`bridge /config responded with HTTP ${response.status}`);
+  }
+  const config = (await response.json()) as IgnisBridgeConfig;
+  cachedBridgeConfig = config;
+  if (typeof window !== 'undefined') {
+    (window as IgnisWindow).__claudianBridgeConfig = { ...config, makeFsUrl };
+  }
+  return config;
 }
 
 /**
@@ -171,9 +237,14 @@ export function getIgnisHostPath(browserPath: string): string {
 }
 
 // History replay needs the host mapping as early as possible; fire the fetch
-// at module load when running under Ignis (no-op everywhere else).
-if (typeof window !== 'undefined' && (window as IgnisWindow).__ignis) {
-  ensureIgnisBridgeConfig();
+// at module load in every remote runtime with a resolvable bridge (no-op on
+// plain desktop and on mobile before the bridge URL has been configured).
+if (typeof window !== 'undefined') {
+  try {
+    ensureIgnisBridgeConfig();
+  } catch {
+    // Never let an early probe break plugin load.
+  }
 }
 
 type ListenerMap = Map<string, Array<{ listener: (...args: unknown[]) => void; once: boolean }>>;

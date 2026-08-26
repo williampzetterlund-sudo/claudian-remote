@@ -631,6 +631,25 @@
       "name": "Maximale gleichzeitig laufende Sitzungen",
       "desc": "Maximale Anzahl gleichzeitig bereiter Agent-Sitzungen (5-10). Ältere inaktive Sitzungen pausieren automatisch und werden bei Nutzung fortgesetzt."
     },
+    "bridge": {
+      "command": "Remote-Bridge konfigurieren",
+      "heading": "Remote-Bridge",
+      "url": {
+        "name": "Bridge-URL",
+        "desc": "WebSocket-URL der Claudian-Bridge, die die CLI auf einem entfernten Host ausführt (z. B. wss://bridge.example.com). Auf Mobilgeräten erforderlich, sonst optional. Wird nur auf diesem Gerät gespeichert — niemals synchronisiert."
+      },
+      "token": {
+        "name": "Bridge-Token",
+        "desc": "Authentifizierungs-Token für die Bridge. Wird nur auf diesem Gerät gespeichert — niemals synchronisiert."
+      },
+      "test": {
+        "name": "Verbindung testen",
+        "desc": "Ruft den /config-Endpunkt der Bridge mit obiger URL und obigem Token ab.",
+        "button": "Testen",
+        "ok": "Bridge OK — Vault-Wurzel: {vaultRoot}",
+        "fail": "Bridge-Verbindung fehlgeschlagen"
+      }
+    },
     "collabGitInstallation": {
       "summary": "Hilfe zur Git-Einrichtung",
       "requirement": "Claudian Collab verwendet Native Git 2.38 oder neuer, das auf diesem Computer installiert ist.",

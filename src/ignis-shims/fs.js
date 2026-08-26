@@ -5,9 +5,17 @@
 
 const { Readable, Writable } = require('./stream.js');
 
-const hostFs = typeof window !== 'undefined' && typeof window.require === 'function'
-  ? window.require('fs')
-  : {};
+let hostFs = {};
+try {
+  // Ignis provides a vault-scoped fs through its window.require registry.
+  // Obsidian mobile has no registry (or one that throws for 'fs'); there the
+  // bridge HTTP reads below are the only backend.
+  if (typeof window !== 'undefined' && typeof window.require === 'function') {
+    hostFs = window.require('fs') || {};
+  }
+} catch {
+  hostFs = {};
+}
 
 function enosys(operation, path) {
   const error = new Error(`ENOSYS: operation not supported in Ignis build, ${operation} '${path ?? ''}'`);

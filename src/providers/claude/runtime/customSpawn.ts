@@ -8,17 +8,25 @@ import {
   type WindowsCmdShimSpawnSpec,
 } from '../../../utils/windowsCmdShim';
 import {
+  BridgeNotConfiguredError,
   createRemoteSpawnFunction,
   ensureIgnisBridgeConfig,
-  isIgnisRuntime,
+  isBridgeConfigured,
+  isRemoteRuntime,
 } from './remoteSpawn';
 
 export function createCustomSpawnFunction(
   enhancedPath: string
 ): (options: SpawnOptions) => SpawnedProcess {
-  // Ignis runs this plugin in a browser: no child_process exists, so the CLI
-  // is spawned by the WebSocket bridge on the host instead.
-  if (isIgnisRuntime()) {
+  // Ignis (browser) and Obsidian mobile have no child_process: the CLI is
+  // spawned by the WebSocket bridge on the host instead.
+  if (isRemoteRuntime()) {
+    if (!isBridgeConfigured()) {
+      // Surface a actionable error instead of a dead ws://localhost attempt.
+      return () => {
+        throw new BridgeNotConfiguredError();
+      };
+    }
     ensureIgnisBridgeConfig();
     return createRemoteSpawnFunction();
   }

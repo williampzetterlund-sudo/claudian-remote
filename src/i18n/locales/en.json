@@ -631,6 +631,25 @@
       "name": "Maximum concurrent running sessions",
       "desc": "Maximum number of agent sessions kept ready at once (5-10). Older idle sessions pause automatically and resume when used."
     },
+    "bridge": {
+      "command": "Configure remote bridge",
+      "heading": "Remote bridge",
+      "url": {
+        "name": "Bridge URL",
+        "desc": "WebSocket URL of the Claudian bridge that runs the CLI on a remote host (e.g. wss://bridge.example.com). Required on mobile; optional elsewhere. Stored on this device only — it is never synced."
+      },
+      "token": {
+        "name": "Bridge token",
+        "desc": "Authentication token for the bridge. Stored on this device only — it is never synced."
+      },
+      "test": {
+        "name": "Test connection",
+        "desc": "Fetches the bridge /config endpoint with the URL and token above.",
+        "button": "Test",
+        "ok": "Bridge OK — vault root: {vaultRoot}",
+        "fail": "Bridge connection failed"
+      }
+    },
     "collabGitInstallation": {
       "summary": "Git setup help",
       "requirement": "Claudian Collab uses Native Git 2.38 or newer installed on your computer.",

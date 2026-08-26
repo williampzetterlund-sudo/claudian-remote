@@ -25,6 +25,7 @@ import {
   MIN_WARM_AGENT_PROCESSES,
 } from '../chat/execution/WarmExecutionPool';
 import type { FeatureHost } from '../FeatureHost';
+import { renderBridgeSettingsSection } from '../../shared/settings/BridgeSettingsSection';
 import { AgentSkillManagementCoordinator } from './AgentSkillManagementCoordinator';
 import { buildNavMappingText, parseNavMappings } from './keyboardNavigation';
 
@@ -735,6 +736,9 @@ export class ClaudianSettingTab extends PluginSettingTab {
             }
           });
       });
+
+    // --- Remote bridge (Ignis / mobile) ---
+    renderBridgeSettingsSection(container);
 
   }
 

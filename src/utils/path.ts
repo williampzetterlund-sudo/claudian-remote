@@ -3,7 +3,20 @@ import type { App } from 'obsidian';
 import * as os from 'os';
 import * as path from 'path';
 
+import {
+  getIgnisBridgeConfig,
+  isIgnisRuntime,
+  isRemoteRuntime,
+} from '../providers/claude/runtime/remoteSpawn';
+
 export function getVaultPath(app: App): string | null {
+  // In non-Ignis remote runtimes (Obsidian mobile, desktop bridge opt-in) the
+  // CLI works on the bridge host: its vault root — reported by /config — is
+  // the effective working directory. The local Capacitor adapter path would
+  // be meaningless to the bridge, so it is never consulted there.
+  if (isRemoteRuntime() && !isIgnisRuntime()) {
+    return getIgnisBridgeConfig()?.vaultRoot ?? null;
+  }
   const basePath = (app.vault.adapter as { basePath?: unknown } | undefined)?.basePath;
   return typeof basePath === 'string' ? basePath : null;
 }

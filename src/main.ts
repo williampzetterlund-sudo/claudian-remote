@@ -108,6 +108,7 @@ import { type InlineEditContext, InlineEditModal } from './features/inline-edit/
 import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
 import { setLocale, t } from './i18n/i18n';
 import type { Locale } from './i18n/types';
+import { BridgeConfigModal } from './shared/settings/BridgeSettingsSection';
 import { deleteLegacyMcpConfig } from './providers/claude/storage/LegacyMcpConfigCleanup';
 import { buildCursorContext } from './utils/editor';
 import { revealWorkspaceLeaf } from './utils/obsidianCompat';
@@ -288,6 +289,14 @@ export default class ClaudianPlugin extends Plugin {
         name: 'Open chat view',
         callback: () => {
           void this.activateView();
+        },
+      });
+
+      this.addCommand({
+        id: 'configure-bridge',
+        name: t('settings.bridge.command'),
+        callback: () => {
+          new BridgeConfigModal(this.app).open();
         },
       });
 

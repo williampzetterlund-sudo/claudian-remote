@@ -81,6 +81,11 @@ jest.mock('obsidian', () => {
       callback(createChainableComponent());
       return this;
     }
+
+    addButton(callback: (button: MockChainableComponent) => void): this {
+      callback(createChainableComponent());
+      return this;
+    }
   }
 
   function createGitStatusElement(parent: 'control' | 'name') {
@@ -106,6 +111,9 @@ jest.mock('obsidian', () => {
       'setPlaceholder',
       'setLimits',
       'setDynamicTooltip',
+      'setButtonText',
+      'onClick',
+      'setDisabled',
     ]) {
       component[method] = jest.fn(() => component);
     }

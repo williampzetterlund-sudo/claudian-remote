@@ -631,6 +631,25 @@
       "name": "最大并发运行会话数",
       "desc": "同时保持就绪的代理会话最大数量（5-10）。较早的空闲会话会自动暂停，并在使用时恢复。"
     },
+    "bridge": {
+      "command": "配置远程桥接",
+      "heading": "远程桥接",
+      "url": {
+        "name": "桥接 URL",
+        "desc": "在远程主机上运行 CLI 的 Claudian 桥接的 WebSocket URL（例如 wss://bridge.example.com）。移动端必填，其他平台可选。仅保存在本设备上，绝不同步。"
+      },
+      "token": {
+        "name": "桥接令牌",
+        "desc": "桥接的身份验证令牌。仅保存在本设备上，绝不同步。"
+      },
+      "test": {
+        "name": "测试连接",
+        "desc": "使用上述 URL 和令牌请求桥接的 /config 端点。",
+        "button": "测试",
+        "ok": "桥接正常 — Vault 根目录：{vaultRoot}",
+        "fail": "桥接连接失败"
+      }
+    },
     "collabGitInstallation": {
       "summary": "Git 设置帮助",
       "requirement": "Claudian Collab 使用安装在电脑上的 Native Git 2.38 或更高版本。",

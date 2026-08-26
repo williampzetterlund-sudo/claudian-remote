@@ -631,6 +631,25 @@
       "name": "最大並行執行工作階段數",
       "desc": "同時保持就緒的代理工作階段最大數量（5-10）。較早的閒置工作階段會自動暫停，並在使用時恢復。"
     },
+    "bridge": {
+      "command": "設定遠端橋接",
+      "heading": "遠端橋接",
+      "url": {
+        "name": "橋接 URL",
+        "desc": "在遠端主機上執行 CLI 的 Claudian 橋接的 WebSocket URL（例如 wss://bridge.example.com）。行動裝置必填，其他平台選填。僅儲存在此裝置上，絕不同步。"
+      },
+      "token": {
+        "name": "橋接權杖",
+        "desc": "橋接的驗證權杖。僅儲存在此裝置上，絕不同步。"
+      },
+      "test": {
+        "name": "測試連線",
+        "desc": "使用上述 URL 與權杖請求橋接的 /config 端點。",
+        "button": "測試",
+        "ok": "橋接正常 — Vault 根目錄：{vaultRoot}",
+        "fail": "橋接連線失敗"
+      }
+    },
     "collabGitInstallation": {
       "summary": "Git 設定協助",
       "requirement": "Claudian Collab 使用安裝在電腦上的 Native Git 2.38 或更新版本。",

@@ -30,6 +30,9 @@ const { promises: fsPromises } = await import('fs');
 const shimDirectory = path.join(process.cwd(), 'src', 'ignis-shims');
 
 // Modules the SDK or Claudian need real behavior for in the browser.
+// path/crypto/util used to pass through to the Ignis window.require registry,
+// but Obsidian mobile has no registry — the bundle carries its own shims so
+// one build serves both environments.
 const shimmedModules = {
   events: 'events.js',
   stream: 'stream.js',
@@ -44,6 +47,18 @@ const shimmedModules = {
   'fs/promises': 'fs-promises.js',
   process: 'process.js',
   buffer: 'buffer.js',
+  path: 'path.js',
+  crypto: 'crypto.js',
+  util: 'util.js',
+  // Loud stubs: require() succeeds (mobile has no registry to fall back on),
+  // any actual use throws. These are only reached on desktop code paths.
+  child_process: 'stubs/child_process.js',
+  net: 'stubs/net.js',
+  tls: 'stubs/tls.js',
+  http: 'stubs/http.js',
+  https: 'stubs/https.js',
+  dgram: 'stubs/dgram.js',
+  sqlite: 'stubs/sqlite.js',
 };
 
 const shimAliases = {};
@@ -154,7 +169,12 @@ const context = await esbuild.context({
   },
   inject: [path.join(shimDirectory, 'inject-globals.js')],
   define: {
-    CLAUDIAN_BRIDGE_TOKEN: JSON.stringify(readBridgeToken()),
+    // Baking the token is a LOCAL deploy convenience only (Ignis on the same
+    // host as the bridge). Release builds must never carry it — the plugin
+    // reads the token from localStorage via the settings UI instead.
+    CLAUDIAN_BRIDGE_TOKEN: JSON.stringify(
+      process.env.CLAUDIAN_BAKE_TOKEN === '1' ? readBridgeToken() : '',
+    ),
   },
   banner: {
     js: "var __filename='/plugins/realclaudian/main.js';var __dirname='/plugins/realclaudian';",

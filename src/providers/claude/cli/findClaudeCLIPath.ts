@@ -6,7 +6,7 @@ import { parsePathEntries, resolveNvmDefaultBin } from '../../../utils/path';
 import {
   ensureIgnisBridgeConfig,
   IGNIS_BRIDGE_CLI_PATH,
-  isIgnisRuntime,
+  isRemoteRuntime,
 } from '../runtime/remoteSpawn';
 
 const CLAUDE_CODE_PACKAGE_SEGMENTS = ['node_modules', '@anthropic-ai', 'claude-code'];
@@ -177,9 +177,10 @@ function getNpmClaudeCodeEntrypointPaths(): string[] {
 }
 
 export function findClaudeCLIPath(pathValue?: string): string | null {
-  // Under Ignis the CLI runs on the bridge host; local filesystem probing is
-  // meaningless there, so resolution short-circuits to the bridge sentinel.
-  if (isIgnisRuntime()) {
+  // In remote runtimes (Ignis, Obsidian mobile, explicit bridge opt-in) the
+  // CLI runs on the bridge host; local filesystem probing is meaningless
+  // there, so resolution short-circuits to the bridge sentinel.
+  if (isRemoteRuntime()) {
     ensureIgnisBridgeConfig();
     return IGNIS_BRIDGE_CLI_PATH;
   }
