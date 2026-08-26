@@ -131,6 +131,7 @@ describe('types.ts', () => {
         dualPaneSide: 'right',
         restoreTabsOnStartup: true,
         collabEnabled: false,
+        remoteControlEnabled: false,
         collabProjectsFolder: 'workspace',
         collabGitPath: '',
         hiddenProviderCommands: {
@@ -192,6 +193,7 @@ describe('types.ts', () => {
         dualPaneSide: 'right',
         restoreTabsOnStartup: true,
         collabEnabled: false,
+        remoteControlEnabled: false,
         collabProjectsFolder: 'workspace',
         collabGitPath: '',
         hiddenProviderCommands: {
@@ -254,6 +256,7 @@ describe('types.ts', () => {
         dualPaneSide: 'left',
         restoreTabsOnStartup: false,
         collabEnabled: true,
+        remoteControlEnabled: false,
         collabProjectsFolder: 'Shared/Projects',
         collabGitPath: '/usr/bin/git',
         hiddenProviderCommands: {

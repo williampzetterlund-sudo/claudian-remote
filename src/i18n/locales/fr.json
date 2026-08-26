@@ -665,6 +665,10 @@
       "name": "Restaurer les onglets au démarrage",
       "desc": "Rouvrir tous les onglets en mode volet unique, ou uniquement le dernier onglet actif en mode double volet."
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "Expose chaque session Claude comme session Remote Control claude.ai, afin de poursuivre la conversation depuis l'app Claude sur téléphone, ordinateur ou web. Même processus, même conversation."
+    },
     "enableFilePane": {
       "name": "Activer le volet des fichiers",
       "desc": "Afficher un onglet Fichiers dans le gestionnaire de sessions du mode double volet."

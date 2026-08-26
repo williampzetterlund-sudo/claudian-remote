@@ -11,6 +11,7 @@ import {
   providerOutputEventToStreamChunk,
 } from '../controllers/StreamController';
 import type { ChatExecutionEventContext } from '../execution/ChatExecutionCoordinator';
+import { REMOTE_CONTROL_UPDATED_EVENT } from '../remoteControlEvents';
 import { updatePlanModeUI } from './TabProviderState';
 import type { AssembledTabRuntime } from './types';
 
@@ -40,6 +41,15 @@ async function handleTabSessionEvent(
   isCurrent: () => boolean,
 ): Promise<void> {
   if (!isCurrent()) return;
+  if (
+    event.type === 'session_state_changed'
+    && event.snapshot.providerState
+    && 'remoteControl' in event.snapshot.providerState
+  ) {
+    (plugin.app.workspace as unknown as {
+      trigger(name: string): void;
+    }).trigger(REMOTE_CONTROL_UPDATED_EVENT);
+  }
   if (event.type === 'mode_changed') {
     await updatePlanModeUI(tab, plugin, normalizeProviderMode(event.mode));
     if (!isCurrent()) return;
@@ -83,6 +93,8 @@ async function handleTabSessionEvent(
     turns.delete(event.scope.turnId);
     deleteBackgroundTurnBuffersIfEmpty(tab, context.bindingId, turns);
     if (!hasBufferedTurn) return;
+    const renderedRemotePrompt = renderRemotePrompts(tab, events, isCurrent);
+    if (!isCurrent()) return;
     const chunks = events
       .map(providerOutputEventToStreamChunk)
       .filter((chunk): chunk is StreamChunk => chunk !== null);
@@ -95,7 +107,7 @@ async function handleTabSessionEvent(
       },
     }, isCurrent);
     if (isCurrent()) {
-      const reportReviewableSettlement = hasVisibleOutput
+      const reportReviewableSettlement = hasVisibleOutput || renderedRemotePrompt
         ? tab.captureReviewableSettlement?.('completed')
         : null;
       try {
@@ -210,6 +222,39 @@ function isVisibleAutoTurnChunk(chunk: StreamChunk, hiddenToolIds: Set<string>):
     default:
       return false;
   }
+}
+
+/**
+ * Prompts typed in the Claude app (Remote Control) reach the CLI over the
+ * bridge and are echoed back as replayed user messages. Render them as the
+ * user's own bubbles so the Claudian transcript matches the app.
+ */
+function renderRemotePrompts(
+  tab: AssembledTabRuntime,
+  events: readonly ProviderBackgroundOutputEvent[],
+  isCurrent: () => boolean,
+): boolean {
+  let rendered = false;
+  for (const event of events) {
+    if (event.type !== 'user_message_started') continue;
+    const content = event.content?.trim();
+    if (!content) continue;
+    if (!isCurrent() || !tab.dom.contentEl.isConnected) return rendered;
+    const message: ChatMessage = {
+      id: createTabMessageId(),
+      role: 'user',
+      content,
+      displayContent: content,
+      timestamp: Date.now(),
+      ...(event.nativeUserMessageId
+        ? { userMessageId: event.nativeUserMessageId }
+        : {}),
+    };
+    tab.state.addMessage(message);
+    tab.renderer.addMessage(message);
+    rendered = true;
+  }
+  return rendered;
 }
 
 function hasVisibleAutoTurnMessageContent(message: ChatMessage): boolean {

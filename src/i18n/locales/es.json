@@ -665,6 +665,10 @@
       "name": "Restaurar pestañas al iniciar",
       "desc": "Volver a abrir todas las pestañas en el modo de panel único o solo la última pestaña activa en el modo de panel doble."
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "Expone cada sesión de Claude como una sesión de Remote Control de claude.ai, para continuar la conversación desde la app de Claude en el teléfono, el escritorio o la web. Mismo proceso, misma conversación."
+    },
     "enableFilePane": {
       "name": "Activar panel de archivos",
       "desc": "Mostrar una pestaña Archivos en el gestor de sesiones del modo de panel doble."

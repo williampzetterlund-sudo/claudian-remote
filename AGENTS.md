@@ -49,6 +49,14 @@ The default full check is:
 npm run typecheck && npm run lint && npm run test && npm run build
 ```
 
+## Ignis Build (local fork addition)
+
+`node esbuild.ignis.mjs [deployDir]` produces a browser build for Ignis (Obsidian-in-browser), where the Claude CLI is reached through a WebSocket bridge instead of `child_process`. Rules:
+
+- `src/ignis-shims/*.js` are CommonJS browser shims consumed only via `esbuild.ignis.mjs` aliases. They must stay dependency-free plain JS, must not use `console.*`, and must never be imported from TypeScript source.
+- `src/providers/claude/runtime/remoteSpawn.ts` must remain free of Node imports; it runs in a plain browser context. Ignis detection is `window.__ignis` only.
+- The desktop build must stay unaffected: Ignis-only behavior is gated on `isIgnisRuntime()` and build-time `define`/`alias`/`inject` in `esbuild.ignis.mjs`.
+
 Tests mirror `src/` under `tests/unit/` and `tests/integration/`.
 
 ## Architecture

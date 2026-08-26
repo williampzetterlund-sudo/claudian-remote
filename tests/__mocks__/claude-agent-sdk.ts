@@ -335,8 +335,14 @@ export function query({ prompt, options }: { prompt: any; options: Options }): A
     setMcpServers: jest.Mock;
     supportedCommands: jest.Mock;
     getContextUsage: jest.Mock;
+    request: jest.Mock;
   };
   gen.interrupt = jest.fn().mockResolvedValue(undefined);
+  // Control-request channel (Remote Control etc.)
+  gen.request = jest.fn().mockResolvedValue({
+    session_url: 'https://claude.ai/code/session_mock',
+    bridge_session_id: 'cse_mock',
+  });
   // Dynamic update methods for persistent queries
   gen.setModel = jest.fn().mockResolvedValue(undefined);
   gen.setMaxThinkingTokens = jest.fn().mockResolvedValue(undefined);

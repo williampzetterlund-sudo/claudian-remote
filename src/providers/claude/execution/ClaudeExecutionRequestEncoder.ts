@@ -198,6 +198,18 @@ export class ClaudeExecutionRequestEncoder {
         chrome: null,
       };
     }
+    if (
+      this.deps.host.settings.remoteControlEnabled === true
+      && sessionConfig.nativePersistence !== 'disabled-if-supported'
+    ) {
+      // Remote Control: prompts submitted from the Claude app reach this
+      // process over the bridge, not over our stdin. Ask the CLI to echo
+      // every user prompt back so those turns can be rendered in Claudian.
+      options.extraArgs = {
+        ...options.extraArgs,
+        'replay-user-messages': null,
+      };
+    }
     if (sessionConfig.nativePersistence === 'disabled-if-supported') {
       options.persistSession = false;
       if (request.toolPolicy.kind === 'passive') {

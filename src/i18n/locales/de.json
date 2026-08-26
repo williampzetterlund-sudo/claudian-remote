@@ -665,6 +665,10 @@
       "name": "Tabs beim Start wiederherstellen",
       "desc": "Im Einzelbereichsmodus alle Tabs, im Zwei-Spalten-Modus nur den zuletzt aktiven Tab erneut öffnen."
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "Stellt jede Claude-Sitzung als claude.ai-Remote-Control-Sitzung bereit, damit die Unterhaltung in der Claude-App auf Telefon, Desktop oder im Web fortgesetzt werden kann. Gleicher Prozess, gleiche Unterhaltung."
+    },
     "enableFilePane": {
       "name": "Dateibereich aktivieren",
       "desc": "Im Sitzungsmanager des Zwei-Spalten-Modus einen Tab „Dateien“ anzeigen."

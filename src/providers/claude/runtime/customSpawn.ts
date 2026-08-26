@@ -7,10 +7,21 @@ import {
   terminateSpawnedProcess,
   type WindowsCmdShimSpawnSpec,
 } from '../../../utils/windowsCmdShim';
+import {
+  createRemoteSpawnFunction,
+  ensureIgnisBridgeConfig,
+  isIgnisRuntime,
+} from './remoteSpawn';
 
 export function createCustomSpawnFunction(
   enhancedPath: string
 ): (options: SpawnOptions) => SpawnedProcess {
+  // Ignis runs this plugin in a browser: no child_process exists, so the CLI
+  // is spawned by the WebSocket bridge on the host instead.
+  if (isIgnisRuntime()) {
+    ensureIgnisBridgeConfig();
+    return createRemoteSpawnFunction();
+  }
   return (options: SpawnOptions): SpawnedProcess => {
     let { command } = options;
     let { args } = options;

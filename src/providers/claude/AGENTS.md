@@ -28,6 +28,7 @@ The execution session owns the live provider snapshot. History services reconstr
 - Do not duplicate assistant text. The SDK can emit text incrementally and again in the final assistant message; stream handling must preserve the existing dedupe behavior.
 - Token usage is intentionally merged from assistant and result messages. Assistant messages provide accurate input-side counts; result messages provide authoritative context-window data.
 - `createCustomSpawnFunction()` handles Obsidian/Electron process quirks. Preserve full-path `node` resolution and manual abort handling.
+- Under Ignis (`window.__ignis`), `createCustomSpawnFunction()` returns the WebSocket-bridge spawn from `remoteSpawn.ts` and `findClaudeCLIPath()` returns the bridge sentinel path; both branches must stay inert in desktop builds. `remoteSpawn.ts` must not import Node modules.
 
 ## Storage Rules
 

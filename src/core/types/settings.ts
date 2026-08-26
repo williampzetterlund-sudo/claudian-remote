@@ -187,6 +187,8 @@ export interface ClaudianSettings {
   dualPaneSide: DualPaneSide;
   restoreTabsOnStartup: boolean;
   collabEnabled: boolean;
+  /** Expose every Claude session as a claude.ai Remote Control session. */
+  remoteControlEnabled: boolean;
   collabProjectsFolder: string;
   collabGitPath: string;
   sessionManagerOrganization?: SessionManagerOrganization;

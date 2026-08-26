@@ -665,6 +665,10 @@
       "name": "启动时恢复标签页",
       "desc": "单栏模式下重新打开所有标签页，双栏模式下仅重新打开上次活动的标签页。"
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "将每个 Claude 会话公开为 claude.ai Remote Control 会话，以便在手机、桌面或网页版 Claude 应用中继续对话。同一进程，同一对话。"
+    },
     "enableFilePane": {
       "name": "启用文件面板",
       "desc": "在双栏模式的会话管理器中显示“文件”标签页。"

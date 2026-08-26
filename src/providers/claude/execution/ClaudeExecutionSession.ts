@@ -30,6 +30,11 @@ import {
   isSessionMissingError,
 } from '../../../utils/session';
 import type { ClaudeWorkspaceServices } from '../app/ClaudeWorkspaceServices';
+import {
+  enableRemoteControlOnQuery,
+  getRemoteControlState,
+  isRemoteControlEnabled,
+} from '../remoteControl/ClaudeRemoteControl';
 import { executeClaudeRewind } from '../runtime/ClaudeRewindService';
 import { getClaudeState } from '../types/providerState';
 import { ClaudeExecutionEventNormalizer } from './ClaudeExecutionEventNormalizer';
@@ -75,6 +80,9 @@ type ClaudeExecutionSessionServices = Pick<
   'agentManager' | 'commandCatalog' | 'pluginManager'
 >;
 
+/** Upper bound on how long a turn waits for Remote Control to arm. */
+const REMOTE_CONTROL_ARM_TIMEOUT_MS = 5000;
+
 export class ClaudeExecutionSession
 implements
 ProviderExecutionSession,
@@ -115,6 +123,7 @@ ClaudeExecutionStrategySink {
   private currentPermissionMode: PermissionMode;
   private readonly eventNormalizer = new ClaudeExecutionEventNormalizer();
   private nativeQuery: Query | null = null;
+  private readonly remoteControlArmedQueries = new WeakSet<Query>();
   private authoritativeContextWindow: {
     readonly model: string;
     readonly contextWindow: number;
@@ -458,6 +467,29 @@ ClaudeExecutionStrategySink {
       return;
     }
 
+    if (isReplayedUserPrompt(message)) {
+      // `--replay-user-messages` echoes every user prompt. Prompts we sent
+      // ourselves are already rendered; the interesting ones arrive while
+      // no Claudian turn is active — they were typed in the Claude app via
+      // Remote Control. Surface those as a background turn so the
+      // conversation shows the same history on both fronts.
+      if (!this.activeRun) {
+        const content = extractReplayedPromptText(message);
+        if (content) {
+          const target = this.getOutputTarget();
+          if (target) {
+            this.emitTurnOutput(target, {
+              type: 'user_message_started',
+              content,
+              ...(message.uuid ? { nativeUserMessageId: message.uuid } : {}),
+              providerPayload: { origin: 'remote-control' },
+            });
+          }
+        }
+      }
+      return;
+    }
+
     const active = this.activeRun;
     const intendedModel = this.lastEncodedRequest?.model;
     const authoritativeContextWindow = intendedModel
@@ -487,6 +519,7 @@ ClaudeExecutionStrategySink {
           this.services.agentManager.setBuiltinAgentNames(event.agents);
         }
         this.emitStateForCurrentTurn();
+        void this.armRemoteControl();
         if (event.permissionMode) {
           const nativeMode = normalizeSdkPermissionMode(event.permissionMode);
           if (nativeMode) {
@@ -806,6 +839,70 @@ ClaudeExecutionStrategySink {
     }
     return !this.getNativeResumeSessionId()
       || this.replayHistoryOnNextTurn;
+  }
+
+  /**
+   * Claude Remote Control: expose this very CLI process as a claude.ai
+   * session so the conversation can be continued from the Claude app
+   * (phone / desktop / web) without leaving Claudian. Same process, two
+   * fronts. Reattaches to the conversation's existing claude.ai session
+   * across process restarts so the link stays stable.
+   *
+   * Armed BEFORE the first prompt of a process is written (see
+   * `prepareNativeQueryForTurn`) so that opening message reaches the
+   * claude.ai bridge too; the `session_init` call is the fallback. Resolves
+   * once the CLI answered or after `REMOTE_CONTROL_ARM_TIMEOUT_MS` — never
+   * rejects, Remote Control must not block the turn.
+   */
+  private armRemoteControl(query: Query | null = this.nativeQuery): Promise<void> {
+    if (this.disposed || !isRemoteControlEnabled(this.host.settings)) {
+      return Promise.resolve();
+    }
+    // Utility queries (title generation, runtime probes) run without native
+    // persistence and must not surface as their own claude.ai sessions —
+    // mirrors the `--replay-user-messages` gate in the request encoder.
+    if (this.config.nativePersistence === 'disabled-if-supported') {
+      return Promise.resolve();
+    }
+    if (!query || this.remoteControlArmedQueries.has(query)) {
+      return Promise.resolve();
+    }
+    this.remoteControlArmedQueries.add(query);
+    const previous = getRemoteControlState(this.providerState);
+    const prompt = this.lastEncodedRequest?.prompt;
+    const armed = enableRemoteControlOnQuery(query, {
+      previous,
+      prompt,
+    })
+      .then((state) => {
+        if (this.disposed || this.nativeQuery !== query || !state) return;
+        const changed = !previous
+          || previous.bridgeSessionId !== state.bridgeSessionId
+          || previous.sessionUrl !== state.sessionUrl;
+        this.setProviderStateValue('remoteControl', state);
+        if (changed) {
+          this.bumpRevision();
+          this.emitStateForCurrentTurn();
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn('[Claudian] Remote Control could not be enabled:', error);
+      });
+    return new Promise<void>((resolve) => {
+      const timer = window.setTimeout(resolve, REMOTE_CONTROL_ARM_TIMEOUT_MS);
+      void armed.then(() => {
+        window.clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * Strategy hook: the native query is open and its control channel is
+   * live, but the turn's prompt has not been written yet.
+   */
+  prepareNativeQueryForTurn(query: Query): Promise<void> {
+    return this.armRemoteControl(query);
   }
 
   private captureProviderSession(sessionId: string): void {
@@ -1412,4 +1509,31 @@ function createRewindPreparationRequest(): ProviderExecutionRequest {
     toolPolicy: { kind: 'provider-default' },
     signal: new AbortController().signal,
   };
+}
+
+type ReplayedUserPrompt = Extract<SDKMessage, { type: 'user' }> & {
+  readonly isReplay: true;
+  readonly uuid?: string;
+};
+
+function isReplayedUserPrompt(message: SDKMessage): message is ReplayedUserPrompt {
+  return message.type === 'user'
+    && (message as { isReplay?: unknown }).isReplay === true
+    && !(message as { parent_tool_use_id?: unknown }).parent_tool_use_id;
+}
+
+function extractReplayedPromptText(message: ReplayedUserPrompt): string {
+  const content = message.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const typed = block as { type?: string; text?: string };
+    if (typed.type === 'tool_result') return '';
+    if (typed.type === 'text' && typeof typed.text === 'string') {
+      parts.push(typed.text);
+    }
+  }
+  return parts.join('\n').trim();
 }

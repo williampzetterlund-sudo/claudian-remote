@@ -665,6 +665,10 @@
       "name": "시작할 때 탭 복원",
       "desc": "단일 창 모드에서는 모든 탭을, 이중 창 모드에서는 마지막 활성 탭만 다시 엽니다."
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "모든 Claude 세션을 claude.ai Remote Control 세션으로 공개하여 휴대폰, 데스크톱 또는 웹의 Claude 앱에서 대화를 이어갈 수 있게 합니다. 같은 프로세스, 같은 대화입니다."
+    },
     "enableFilePane": {
       "name": "파일 창 활성화",
       "desc": "이중 창 모드의 세션 관리자에 파일 탭을 표시합니다."

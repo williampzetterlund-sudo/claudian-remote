@@ -58,6 +58,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   dualPaneSide: 'right',
   restoreTabsOnStartup: true,
   collabEnabled: false,
+  remoteControlEnabled: false,
   collabProjectsFolder: DEFAULT_COLLAB_PROJECTS_FOLDER,
   collabGitPath: '',
   sessionManagerOrganization: 'list',

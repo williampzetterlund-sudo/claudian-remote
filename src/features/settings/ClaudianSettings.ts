@@ -420,6 +420,19 @@ export class ClaudianSettingTab extends PluginSettingTab {
       });
 
     new Setting(container)
+      .setName(t('settings.remoteControlEnabled.name'))
+      .setDesc(t('settings.remoteControlEnabled.desc'))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.remoteControlEnabled)
+          .onChange(async (value) => {
+            await this.plugin.mutateSettings((settings) => {
+              settings.remoteControlEnabled = value;
+            });
+          });
+      });
+
+    new Setting(container)
       .setName(t('settings.enableAutoScroll.name'))
       .setDesc(t('settings.enableAutoScroll.desc'))
       .addToggle((toggle) =>

@@ -372,6 +372,46 @@ describe('ClaudeExecutionBackend', () => {
     expect(oneShot.getSnapshot().providerSessionId).toBeUndefined();
   });
 
+  it('arms Remote Control on persistent sessions only, never on utility queries', async () => {
+    const { services } = createServices();
+    const host = createHost();
+    (host.settings as { remoteControlEnabled?: boolean }).remoteControlEnabled = true;
+    const backend = new ClaudeExecutionBackend(host, services);
+
+    const persistent = backend.createSession(createConfig());
+    mockBuildClaudeSDKUserMessage.mockClear();
+    await collectEvents(persistent.execute(createRequest()).events);
+    const persistentQuery = sdkMock.getLastResponse() as unknown as { request: jest.Mock };
+    expect(persistentQuery.request).toHaveBeenCalledTimes(1);
+    expect(persistentQuery.request).toHaveBeenCalledWith(expect.objectContaining({
+      subtype: 'remote_control',
+      enabled: true,
+      keep_session_on_exit: true,
+    }));
+    // Armed BEFORE the opening prompt is written, so that message reaches
+    // the claude.ai bridge as well (verified against the CLI 2026-08-23).
+    const rcOrder = persistentQuery.request.mock.invocationCallOrder[0];
+    const promptOrder = mockBuildClaudeSDKUserMessage.mock.invocationCallOrder[0];
+    expect(rcOrder).toBeLessThan(promptOrder);
+    expect(sdkMock.getLastOptions()?.extraArgs).toEqual(
+      expect.objectContaining({ 'replay-user-messages': null }),
+    );
+
+    const titleQuery = backend.createSession(createConfig({
+      lifecycle: 'ephemeral',
+      nativePersistence: 'disabled-if-supported',
+    }));
+    await collectEvents(titleQuery.execute(createRequest({
+      configuration: {
+        systemInstructions: { kind: 'explicit', instructions: 'Generate a title.' },
+      },
+      toolPolicy: { kind: 'passive' },
+    })).events);
+    const utilityQuery = sdkMock.getLastResponse() as unknown as { request: jest.Mock };
+    expect(utilityQuery.request).not.toHaveBeenCalled();
+    expect(sdkMock.getLastOptions()?.extraArgs ?? {}).not.toHaveProperty('replay-user-messages');
+  });
+
   it('maps images and structured context without injecting legacy MCP configuration', async () => {
     const { services } = createServices();
     sdkMock.setMockMessages([
@@ -1577,6 +1617,65 @@ describe('ClaudeExecutionBackend', () => {
       undefined,
     )).resolves.toEqual(expect.objectContaining({
       canRewind: false,
+    }));
+  });
+
+  it('renders Remote Control prompts as background user messages and ignores replays of its own prompt', async () => {
+    const query = createScriptedPersistentQuery([
+      [
+        { type: 'system', subtype: 'init', session_id: 'session-1' },
+        {
+          type: 'user',
+          isReplay: true,
+          uuid: 'own-prompt',
+          message: { role: 'user', content: 'Hello' },
+          parent_tool_use_id: null,
+        },
+        { type: 'result', subtype: 'success' },
+        {
+          type: 'user',
+          isReplay: true,
+          uuid: 'phone-prompt',
+          message: { role: 'user', content: [{ type: 'text', text: 'Hej från telefonen' }] },
+          parent_tool_use_id: null,
+        },
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'Hej tillbaka' }] },
+        },
+        { type: 'result', subtype: 'success' },
+      ],
+    ]);
+    jest.spyOn(
+      await import('@/providers/claude/loadClaudeAgentSdk'),
+      'loadClaudeAgentQuery',
+    ).mockResolvedValueOnce((() => query) as never);
+    const { services } = createServices();
+    const session = new ClaudeExecutionBackend(createHost(), services)
+      .createSession(createConfig());
+    const sessionEvents: ProviderSessionEvent[] = [];
+    session.onEvent((event) => sessionEvents.push(event));
+
+    const requested = await collectEvents(session.execute(createRequest()).events);
+    await query.finished;
+
+    expect(
+      requested.filter((event) => event.type === 'user_message_started'),
+    ).toHaveLength(1);
+    expect(requested).not.toContainEqual(expect.objectContaining({
+      type: 'user_message_started',
+      content: 'Hello',
+    }));
+    expect(sessionEvents.map(({ type }) => type)).toEqual(expect.arrayContaining([
+      'background_turn_started',
+      'user_message_started',
+      'text_delta',
+      'background_turn_completed',
+    ]));
+    expect(sessionEvents).toContainEqual(expect.objectContaining({
+      type: 'user_message_started',
+      content: 'Hej från telefonen',
+      nativeUserMessageId: 'phone-prompt',
     }));
   });
 

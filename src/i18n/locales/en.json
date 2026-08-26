@@ -665,6 +665,10 @@
       "name": "Restore tabs on startup",
       "desc": "Reopen all tabs in single-pane mode or the last active tab in dual-pane mode."
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "Expose every Claude session as a claude.ai Remote Control session, so the conversation can be continued from the Claude app on your phone, desktop or web. Same process, same conversation."
+    },
     "enableFilePane": {
       "name": "Enable file pane",
       "desc": "Show a Files tab in the dual-pane session manager."

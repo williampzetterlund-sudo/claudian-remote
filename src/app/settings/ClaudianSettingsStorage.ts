@@ -137,6 +137,12 @@ function normalizeCollabGitPath(value: unknown): string {
     : DEFAULT_CLAUDIAN_SETTINGS.collabGitPath;
 }
 
+function normalizeRemoteControlEnabled(value: unknown): boolean {
+  return typeof value === 'boolean'
+    ? value
+    : DEFAULT_CLAUDIAN_SETTINGS.remoteControlEnabled;
+}
+
 function normalizeCollabEnabled(value: unknown): boolean {
   return typeof value === 'boolean'
     ? value
@@ -450,6 +456,9 @@ export class ClaudianSettingsStorage {
       stored.restoreTabsOnStartup,
     );
     const collabEnabled = normalizeCollabEnabled(stored.collabEnabled);
+    const remoteControlEnabled = normalizeRemoteControlEnabled(
+      stored.remoteControlEnabled,
+    );
     const collabProjectsFolder = normalizeCollabProjectsFolder(stored.collabProjectsFolder);
     const collabGitPath = normalizeCollabGitPath(stored.collabGitPath);
     const hasCanonicalPinnedPaths = Object.prototype.hasOwnProperty.call(
@@ -485,6 +494,7 @@ export class ClaudianSettingsStorage {
       dualPaneSide,
       restoreTabsOnStartup,
       collabEnabled,
+      remoteControlEnabled,
       collabProjectsFolder,
       collabGitPath,
       sessionManagerOrganization,

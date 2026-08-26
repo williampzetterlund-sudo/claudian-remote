@@ -3,6 +3,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { parsePathEntries, resolveNvmDefaultBin } from '../../../utils/path';
+import {
+  ensureIgnisBridgeConfig,
+  IGNIS_BRIDGE_CLI_PATH,
+  isIgnisRuntime,
+} from '../runtime/remoteSpawn';
 
 const CLAUDE_CODE_PACKAGE_SEGMENTS = ['node_modules', '@anthropic-ai', 'claude-code'];
 const CLAUDE_CODE_NODE_ENTRYPOINTS = ['cli-wrapper.cjs', 'cli.js'];
@@ -172,6 +177,12 @@ function getNpmClaudeCodeEntrypointPaths(): string[] {
 }
 
 export function findClaudeCLIPath(pathValue?: string): string | null {
+  // Under Ignis the CLI runs on the bridge host; local filesystem probing is
+  // meaningless there, so resolution short-circuits to the bridge sentinel.
+  if (isIgnisRuntime()) {
+    ensureIgnisBridgeConfig();
+    return IGNIS_BRIDGE_CLI_PATH;
+  }
   const homeDir = os.homedir();
   const isWindows = process.platform === 'win32';
 

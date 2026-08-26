@@ -24,6 +24,8 @@ export interface ClaudeExecutionStrategySink {
   handleNativeEnd(queryToken: number): void;
   releaseNativeTurnFence(queryToken: number): void;
   handleNativeQueryOpened(query: Query): void;
+  /** Query is open, control channel live, prompt not yet written. */
+  prepareNativeQueryForTurn(query: Query): Promise<void>;
   handleNativeQueryClosed(query: Query): void;
   handleAuthoritativeContextWindow(
     query: Query,
@@ -104,9 +106,15 @@ implements ClaudeExecutionStrategy {
       if (!this.query || !this.messageChannel) {
         throw new Error('Claude persistent query is unavailable');
       }
+      const query0 = this.query;
 
       await this.applyDynamicUpdates(request);
       requestSignal?.throwIfAborted();
+      await this.sink.prepareNativeQueryForTurn(query0);
+      requestSignal?.throwIfAborted();
+      if (!this.query || !this.messageChannel) {
+        throw new Error('Claude persistent query is unavailable');
+      }
       void this.refreshAuthoritativeContextWindow(request.model);
       const message = buildClaudeSDKUserMessage(
         request.prompt,

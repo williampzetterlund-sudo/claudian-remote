@@ -5,6 +5,7 @@ import * as path from 'path';
 import type { ProviderConversationSessionAvailability } from '../../../core/providers/types';
 import type { ClaudeConfigDirContext } from '../config/ClaudeConfigDir';
 import { resolveClaudeConfigDir } from '../config/ClaudeConfigDir';
+import { getIgnisHostPath } from '../runtime/remoteSpawn';
 import type { SDKNativeMessage, SDKSessionReadResult } from './sdkHistoryTypes';
 
 export interface SDKSessionLocation {
@@ -16,9 +17,13 @@ export interface SDKSessionLocation {
  * Encodes a vault path for the SDK project directory name.
  * The SDK replaces ALL non-alphanumeric characters with `-`.
  * This handles Unicode characters and special chars.
+ *
+ * Under Ignis the browser sees the vault root as "/" while the CLI runs with
+ * the host-side vault path; the mapping keeps the encoding aligned with the
+ * transcripts the CLI actually wrote.
  */
 export function encodeVaultPathForSDK(vaultPath: string): string {
-  const absolutePath = path.resolve(vaultPath);
+  const absolutePath = path.resolve(getIgnisHostPath(vaultPath));
   return absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
 }
 

@@ -665,6 +665,10 @@
       "name": "起動時にタブを復元",
       "desc": "シングルペインモードではすべてのタブを、デュアルペインモードでは最後にアクティブだったタブのみを再度開きます。"
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "すべての Claude セッションを claude.ai の Remote Control セッションとして公開し、スマートフォン・デスクトップ・Web の Claude アプリから会話を続けられるようにします。同じプロセス、同じ会話です。"
+    },
     "enableFilePane": {
       "name": "ファイルペインを有効化",
       "desc": "デュアルペインモードのセッションマネージャーに「ファイル」タブを表示します。"

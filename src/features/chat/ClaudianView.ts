@@ -18,6 +18,11 @@ import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
 import { type ConversationMeta, VIEW_TYPE_CLAUDIAN } from '../../core/types';
+import {
+  getRemoteControlState,
+  isRemoteControlEnabled,
+} from '../../providers/claude/remoteControl/ClaudeRemoteControl';
+import { REMOTE_CONTROL_UPDATED_EVENT } from './remoteControlEvents';
 import { t } from '../../i18n/i18n';
 import {
   cancelScheduledAnimationFrame,
@@ -85,6 +90,7 @@ export class ClaudianView extends ItemView {
   // DOM Elements
   private viewContainerEl: HTMLElement | null = null;
   private newTabButtonEl: HTMLElement | null = null;
+  private remoteControlButtonEl: HTMLElement | null = null;
   private sessionNewButtonEl: HTMLElement | null = null;
   private sessionSearchFieldEl: HTMLElement | null = null;
   private sessionSearchInputEl: HTMLInputElement | null = null;
@@ -388,6 +394,7 @@ export class ClaudianView extends ItemView {
       this.notifyConversationNavigationChanged();
       this.updateInputLocation();
       this.syncProviderBrandColor();
+      this.refreshRemoteControlButton();
     };
     const tabManager = new TabManager(
       this.plugin,
@@ -414,10 +421,21 @@ export class ClaudianView extends ItemView {
           }
           this.persistTabWorkspaceState(tabManager, tabStatePersistence);
         },
-        onTabStreamingChanged: () => {
+        onTabStreamingChanged: (_tabId, isStreaming) => {
           if (isTabWorkspaceInitialized()) {
             this.updateTabBar();
             this.notifyConversationNavigationChanged();
+            this.refreshRemoteControlButton();
+            if (isStreaming) {
+              // The Remote Control link lands a moment after session init,
+              // mid-turn; poll briefly so the button appears without
+              // waiting for the turn to finish.
+              for (const delay of [3000, 8000, 15000]) {
+                window.setTimeout(() => {
+                  if (this.tabManager === tabManager) this.refreshRemoteControlButton();
+                }, delay);
+              }
+            }
           }
         },
         onTabRewindingChanged: () => {
@@ -447,6 +465,7 @@ export class ClaudianView extends ItemView {
             this.updateTabBar();
             this.notifyConversationNavigationChanged();
             this.syncProviderBrandColor();
+            this.refreshRemoteControlButton();
           }
           this.persistTabWorkspaceState(tabManager, tabStatePersistence);
         },
@@ -716,6 +735,23 @@ export class ClaudianView extends ItemView {
       this.toggleHistoryDropdown();
     });
 
+    // Claude Remote Control: open this conversation in the Claude app.
+    this.remoteControlButtonEl = navActionsEl.createDiv({
+      cls: 'claudian-input-nav-btn claudian-remote-control-btn claudian-hidden',
+    });
+    setIcon(this.remoteControlButtonEl, 'smartphone');
+    this.remoteControlButtonEl.setAttribute('aria-label', 'Open in the Claude app');
+    this.remoteControlButtonEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openRemoteControlSession();
+    });
+    this.remoteControlButtonEl.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void this.copyRemoteControlLink();
+    });
+    this.refreshRemoteControlButton();
+
     if (this.plugin?.collabSurfaceFactory) {
       const compactCollabContainer = navActionsEl.createDiv({
         cls: 'claudian-compact-collab-container claudian-nav-dropup-container',
@@ -913,6 +949,57 @@ export class ClaudianView extends ItemView {
   }
 
   /** Refreshes tab controls after settings that affect tab availability change. */
+  // ============================================
+  // Claude Remote Control (open this conversation in the Claude app)
+  // ============================================
+
+  private getActiveRemoteControlUrl(): string | null {
+    if (!isRemoteControlEnabled(this.plugin.settings)) return null;
+    const tab = this.tabManager?.getActiveTab();
+    if (!tab || tab.providerId !== 'claude') return null;
+    const liveState = getRemoteControlState(
+      tab.executionCoordinator.snapshot?.providerState,
+    );
+    if (liveState) return liveState.sessionUrl;
+    const conversationId = tab.conversationId;
+    if (!conversationId) return null;
+    const conversation = this.plugin.getConversationSync(conversationId);
+    return getRemoteControlState(conversation?.providerState)?.sessionUrl ?? null;
+  }
+
+  refreshRemoteControlButton(): void {
+    const button = this.remoteControlButtonEl;
+    if (!button) return;
+    const url = this.getActiveRemoteControlUrl();
+    button.toggleClass('claudian-hidden', !url);
+    if (url) {
+      button.setAttribute('title', 'Open in the Claude app (right-click to copy link)');
+      button.dataset.remoteControlUrl = url;
+    } else {
+      delete button.dataset.remoteControlUrl;
+    }
+  }
+
+  private openRemoteControlSession(): void {
+    const url = this.getActiveRemoteControlUrl();
+    if (!url) {
+      new Notice('This conversation has no Remote Control session yet.');
+      return;
+    }
+    window.open(url, '_blank', 'noopener');
+  }
+
+  private async copyRemoteControlLink(): Promise<void> {
+    const url = this.getActiveRemoteControlUrl();
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      new Notice('Remote Control link copied');
+    } catch {
+      new Notice(url);
+    }
+  }
+
   refreshTabControls(): void {
     this.updateTabBarVisibility();
   }
@@ -963,6 +1050,7 @@ export class ClaudianView extends ItemView {
       const items = this.tabManager.getTabBarItems();
       this.tabBar.update(items);
       this.updateTabBarVisibility();
+      this.refreshRemoteControlButton();
     }, this.containerEl.ownerDocument.defaultView ?? null);
   }
 
@@ -2600,6 +2688,15 @@ export class ClaudianView extends ItemView {
     this.registerEvent(
       this.plugin.app.workspace.on('file-open', (file) => {
         this.handleWorkspaceFileOpen(file);
+      })
+    );
+
+    // Remote Control link arrived / changed for some conversation.
+    this.registerEvent(
+      (this.plugin.app.workspace as unknown as {
+        on(name: string, cb: () => void): EventRef;
+      }).on(REMOTE_CONTROL_UPDATED_EVENT, () => {
+        this.refreshRemoteControlButton();
       })
     );
 

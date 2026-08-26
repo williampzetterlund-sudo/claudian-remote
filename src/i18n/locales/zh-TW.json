@@ -665,6 +665,10 @@
       "name": "啟動時還原分頁",
       "desc": "單欄模式下重新開啟所有分頁，雙欄模式下僅重新開啟上次使用的分頁。"
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "將每個 Claude 工作階段公開為 claude.ai Remote Control 工作階段，以便在手機、桌面或網頁版 Claude 應用程式中繼續對話。同一程序，同一對話。"
+    },
     "enableFilePane": {
       "name": "啟用檔案面板",
       "desc": "在雙欄模式的工作階段管理器中顯示「檔案」分頁。"

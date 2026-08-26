@@ -665,6 +665,10 @@
       "name": "Restaurar abas ao iniciar",
       "desc": "Reabrir todas as abas no modo de painel único ou apenas a última aba ativa no modo de painel duplo."
     },
+    "remoteControlEnabled": {
+      "name": "Claude Remote Control",
+      "desc": "Expõe cada sessão do Claude como uma sessão Remote Control do claude.ai, para continuar a conversa no app Claude no telefone, desktop ou web. Mesmo processo, mesma conversa."
+    },
     "enableFilePane": {
       "name": "Ativar painel de arquivos",
       "desc": "Mostrar uma aba Arquivos no gerenciador de sessões do modo de painel duplo."
