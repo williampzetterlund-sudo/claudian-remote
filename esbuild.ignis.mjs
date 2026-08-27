@@ -131,34 +131,31 @@ const patchRendererUnsafeUnref = {
 
 const deployDirectory = process.argv[2] ?? process.env.IGNIS_PLUGIN_DIR ?? null;
 
-const deployToIgnis = {
-  name: 'deploy-to-ignis',
-  setup(build) {
-    build.onEnd((result) => {
-      if (result.errors.length > 0 || !deployDirectory) return;
-      if (!existsSync(deployDirectory)) {
-        mkdirSync(deployDirectory, { recursive: true });
-      }
-      for (const file of ['main.js', 'styles.css']) {
-        if (existsSync(file)) {
-          copyFileSync(file, path.join(deployDirectory, file));
-          console.log(`Copied ${file} to ${deployDirectory}`);
-        }
-      }
-      // Ignis ships Obsidian 1.12.x and reports Platform.isMobile, so both the
-      // desktop version gate (1.13.0) and isDesktopOnly would silently skip
-      // the plugin.
-      const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
-      manifest.minAppVersion = '1.12.0';
-      manifest.isDesktopOnly = false;
-      writeFileSync(
-        path.join(deployDirectory, 'manifest.json'),
-        `${JSON.stringify(manifest, null, 2)}\n`,
-      );
-      console.log(`Copied manifest.json (minAppVersion 1.12.0) to ${deployDirectory}`);
-    });
-  },
-};
+// Körs EFTER minifieringspasset — kopiering som onEnd-plugin skulle skeppa
+// den ominifierade bundeln.
+function deployToDirectory() {
+  if (!deployDirectory) return;
+  if (!existsSync(deployDirectory)) {
+    mkdirSync(deployDirectory, { recursive: true });
+  }
+  for (const file of ['main.js', 'styles.css']) {
+    if (existsSync(file)) {
+      copyFileSync(file, path.join(deployDirectory, file));
+      console.log(`Copied ${file} to ${deployDirectory}`);
+    }
+  }
+  // Ignis ships Obsidian 1.12.x and reports Platform.isMobile, so both the
+  // desktop version gate (1.13.0) and isDesktopOnly would silently skip
+  // the plugin.
+  const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
+  manifest.minAppVersion = '1.12.0';
+  manifest.isDesktopOnly = false;
+  writeFileSync(
+    path.join(deployDirectory, 'manifest.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  console.log(`Copied manifest.json (minAppVersion 1.12.0) to ${deployDirectory}`);
+}
 
 const context = await esbuild.context({
   entryPoints: ['src/main.ts'],
@@ -184,14 +181,20 @@ const context = await esbuild.context({
     patchSdkImportMeta,
     createPierreShikiBundlePlugin(),
     patchRendererUnsafeUnref,
-    deployToIgnis,
+
   ],
   external,
   format: 'cjs',
   loader: { '.wasm': 'binary' },
-  target: 'es2022',
+  // safari16: äldre mobil-JavaScriptCore kastar SyntaxError på hela bundeln
+  // för es2022-syntax (static blocks m.m.) — Obsidian visar det bara som
+  // "failed to load plugin". Regex-lookbehind kan esbuild inte transpilera;
+  // de kräver iOS 16.4+.
+  target: ['es2022', 'safari16'],
   charset: 'utf8',
   logLevel: 'info',
+  // OBS: minifieringen sker i ett SEPARAT pass efter rebuild — patch-plugins
+  // (patchSdkImportMeta m.fl.) matchar bara ominifierad utskrift.
   minify: false,
   sourcemap: false,
   treeShaking: true,
@@ -200,4 +203,28 @@ const context = await esbuild.context({
 
 await context.rebuild();
 await context.dispose();
+
+// Minifieringspass på den redan patchade bundeln. Separat steg med flit:
+// patch-plugins (patchSdkImportMeta, rendererSafeUnref) matchar bara
+// ominifierad esbuild-utskrift, så ordningen är bundla → patcha → minifiera.
+// keepNames skyddar kod som läser function-/klassnamn i runtime.
+// CLAUDIAN_MINIFY: 'off' | 'ws' | 'syntax' | 'full' (default full)
+const minifyMode = process.env.CLAUDIAN_MINIFY ?? 'full';
+if (minifyMode !== 'off') {
+  await esbuild.build({
+    entryPoints: ['main.js'],
+    outfile: 'main.js',
+    allowOverwrite: true,
+    bundle: false,
+    minifyWhitespace: true,
+    minifySyntax: minifyMode === 'syntax' || minifyMode === 'full',
+    minifyIdentifiers: minifyMode === 'full',
+    keepNames: process.env.CLAUDIAN_KEEPNAMES !== '0',
+    target: ['es2022', 'safari16'],
+    charset: 'utf8',
+    logLevel: 'info',
+  });
+}
+
+deployToDirectory();
 process.exit(0);
