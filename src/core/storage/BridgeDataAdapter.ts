@@ -27,18 +27,35 @@ export class BridgeDataAdapter implements DataAdapter {
     return this.vaultRootCache ?? '';
   }
 
-  private async hostPath(normalizedPath: string): Promise<string> {
+  /**
+   * Host path for a vault-relative path, or null while the bridge is
+   * unconfigured/unreachable. Null MUST degrade gracefully (empty reads,
+   * no-op writes): this adapter runs inside plugin onload, and throwing there
+   * kills the whole plugin — including the very command used to configure the
+   * bridge. Nothing is cached on failure, so the first call after the user
+   * configures the bridge goes live immediately.
+   */
+  private async hostPath(normalizedPath: string): Promise<string | null> {
     if (!this.vaultRootCache) {
-      const config = await getBridgeConfigAsync();
-      if (!config?.vaultRoot) {
-        throw withCode(new Error('BridgeDataAdapter: bridge config unavailable'), 'ENOENT');
-      }
+      const config = await getBridgeConfigAsync().catch(() => null);
+      if (!config?.vaultRoot) return null;
       this.vaultRootCache = config.vaultRoot;
     }
     if (!normalizedPath || normalizedPath === '/' || normalizedPath === '.') {
       return this.vaultRootCache;
     }
     return `${this.vaultRootCache}/${normalizedPath}`;
+  }
+
+  private warnedUnconfigured = false;
+
+  private noteUnconfigured(operation: string): void {
+    if (this.warnedUnconfigured) return;
+    this.warnedUnconfigured = true;
+    console.warn(
+      `Claudian: bridge not configured — ${operation} (and later .claudian I/O) is a no-op until `
+      + 'the bridge URL and token are set (command: "Configure remote bridge").',
+    );
   }
 
   private async request(
@@ -55,7 +72,12 @@ export class BridgeDataAdapter implements DataAdapter {
   }
 
   private async readRequest(route: string, targetPath: string): Promise<Response> {
-    const response = await this.request(route, { path: await this.hostPath(targetPath) });
+    const hostPath = await this.hostPath(targetPath);
+    if (hostPath === null) {
+      // Unconfigured bridge presents as an empty store: reads are "missing".
+      throw withCode(new Error(`ENOENT: bridge not configured, '${targetPath}'`), 'ENOENT');
+    }
+    const response = await this.request(route, { path: hostPath });
     if (response.status === 404) {
       throw withCode(new Error(`ENOENT: no such file or directory, '${targetPath}'`), 'ENOENT');
     }
@@ -74,9 +96,16 @@ export class BridgeDataAdapter implements DataAdapter {
     body?: ArrayBuffer | string,
     extraParams: Record<string, string> = {},
   ): Promise<void> {
+    const hostPath = await this.hostPath(targetPath);
+    if (hostPath === null) {
+      // No-op instead of throwing: writes during plugin startup must not kill
+      // onload before the user has had a chance to configure the bridge.
+      this.noteUnconfigured(`${route} '${targetPath}'`);
+      return;
+    }
     const response = await this.request(
       route,
-      { path: await this.hostPath(targetPath), ...extraParams },
+      { path: hostPath, ...extraParams },
       {
         method: 'POST',
         // text/plain keeps the request CORS-simple (no preflight needed).
@@ -96,10 +125,9 @@ export class BridgeDataAdapter implements DataAdapter {
   }
 
   async exists(normalizedPath: string): Promise<boolean> {
-    const response = await this.request(
-      '/fs/stat',
-      { path: await this.hostPath(normalizedPath) },
-    );
+    const hostPath = await this.hostPath(normalizedPath);
+    if (hostPath === null) return false;
+    const response = await this.request('/fs/stat', { path: hostPath });
     if (response.status === 404) return false;
     if (!response.ok) {
       throw withCode(new Error(`bridge fs stat failed (${response.status})`), 'EIO');
@@ -108,10 +136,9 @@ export class BridgeDataAdapter implements DataAdapter {
   }
 
   async stat(normalizedPath: string): Promise<Stat | null> {
-    const response = await this.request(
-      '/fs/stat',
-      { path: await this.hostPath(normalizedPath) },
-    );
+    const hostPath = await this.hostPath(normalizedPath);
+    if (hostPath === null) return null;
+    const response = await this.request('/fs/stat', { path: hostPath });
     if (response.status === 404) return null;
     if (!response.ok) {
       throw withCode(new Error(`bridge fs stat failed (${response.status})`), 'EIO');
@@ -128,6 +155,9 @@ export class BridgeDataAdapter implements DataAdapter {
   }
 
   async list(normalizedPath: string): Promise<ListedFiles> {
+    if (await this.hostPath(normalizedPath) === null) {
+      return { files: [], folders: [] };
+    }
     const response = await this.readRequest('/fs/readdir', normalizedPath);
     const raw = (await response.json()) as { entries: Array<{ name: string; type: string }> };
     const prefix = normalizedPath && normalizedPath !== '/' && normalizedPath !== '.'
@@ -225,9 +255,12 @@ export class BridgeDataAdapter implements DataAdapter {
   }
 
   async rename(normalizedPath: string, normalizedNewPath: string): Promise<void> {
-    await this.writeRequest('/fs/rename', normalizedPath, undefined, {
-      to: await this.hostPath(normalizedNewPath),
-    });
+    const destination = await this.hostPath(normalizedNewPath);
+    if (destination === null) {
+      this.noteUnconfigured(`rename '${normalizedPath}'`);
+      return;
+    }
+    await this.writeRequest('/fs/rename', normalizedPath, undefined, { to: destination });
   }
 
   async copy(normalizedPath: string, normalizedNewPath: string): Promise<void> {

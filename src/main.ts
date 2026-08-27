@@ -236,6 +236,17 @@ export default class ClaudianPlugin extends Plugin {
   async onload() {
     StartupProfiler.startOnload();
     try {
+      // FÖRE allt annat: på mobil/remote är bryggan en förutsättning för
+      // resten av initieringen — kommandot som konfigurerar den får aldrig
+      // vara beroende av att initieringen lyckades.
+      this.addCommand({
+        id: 'configure-bridge',
+        name: t('settings.bridge.command'),
+        callback: () => {
+          new BridgeConfigModal(this.app).open();
+        },
+      });
+
       await StartupProfiler.runAsync(
         'settings-load',
         () => this.loadSettings({ deferNonRestoredSessionMetadata: true }),
@@ -289,14 +300,6 @@ export default class ClaudianPlugin extends Plugin {
         name: 'Open chat view',
         callback: () => {
           void this.activateView();
-        },
-      });
-
-      this.addCommand({
-        id: 'configure-bridge',
-        name: t('settings.bridge.command'),
-        callback: () => {
-          new BridgeConfigModal(this.app).open();
         },
       });
 
