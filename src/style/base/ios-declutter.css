@@ -23,18 +23,24 @@ body.is-ios .workspace-drawer-header {
  * som vanligt.
  */
 body.is-ios .workspace-drawer-tab-options.is-collapsed {
+  /* Ut ur layoutflödet: panelinnehållet återtar hela höjden, och pillen
+     svävar som en liten knapp i hörnet, innanför iOS safe-arean. */
+  position: absolute !important;
+  right: calc(env(safe-area-inset-right, 0px) + 10px) !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px) !important;
+  z-index: 30 !important;
   height: 36px !important;
   min-height: 0 !important;
   width: fit-content !important;
   min-width: 0 !important;
-  max-width: 200px !important;
-  padding: 0 12px !important;
-  margin-left: auto !important;
-  margin-right: 8px !important;
+  max-width: 120px !important;
+  padding: 0 10px !important;
+  margin: 0 !important;
   display: flex !important;
   align-items: center !important;
   border-radius: 18px !important;
   overflow: hidden !important;
+  box-shadow: var(--shadow-s, 0 1px 4px rgba(0, 0, 0, 0.15)) !important;
 }
 
 body.is-ios .workspace-drawer-tab-options.is-collapsed .workspace-tab-header-inner-title {
