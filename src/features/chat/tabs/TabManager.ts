@@ -34,7 +34,14 @@ import {
   onProviderAvailabilityChanged,
   refreshTabWorkspaceServices,
 } from './TabProviderState';
+import {
+  fetchLiveBridgeSessionIds,
+  isRemoteRuntime,
+} from '../../../providers/claude/runtime/remoteSpawn';
 import { createTabRuntime } from './TabRuntimeFactory';
+
+/** Gles poll för livespegling: fångar sessioner som väcks av andra enheter. */
+const LIVE_BRIDGE_FOLLOW_POLL_INTERVAL_MS = 20_000;
 import {
   type AssembledTabRuntime,
   generateTabId,
@@ -548,6 +555,10 @@ export class TabManager implements TabManagerInterface {
       );
       activateTab(tab);
       tab.state.acknowledgeReview();
+      // Livespegling: ansluter aktiva konversationen om dess CLI-process
+      // lever på bryggan, så andra enheters turer renderas live.
+      void this.maybePrepareLiveBridgeFollow(tab);
+      this.ensureLiveBridgeFollowPolling();
       if (this.callbacks.onActiveTabChanged) {
         activeTabChangePublicationStarted = true;
         this.callbacks.onActiveTabChanged(previousTabId, tabId);
@@ -1176,6 +1187,9 @@ export class TabManager implements TabManagerInterface {
 
   /** Restores open shells cold, then activates exactly one final target. */
   async restoreState(state: AppTabManagerState): Promise<void> {
+    // Livespegling: pollen är självförsörjande (slår upp aktiva fliken) och
+    // täcker därmed restore-vägen även om aktiveringskroken inte nås.
+    this.ensureLiveBridgeFollowPolling();
     for (const tabState of state.openTabs) {
       if (
         tabState.conversationId
@@ -2010,6 +2024,9 @@ export class TabManager implements TabManagerInterface {
     if (tab.id !== this.activeTabId) {
       return;
     }
+    // Livespegling även här (hydreringsvägen efter restore).
+    void this.maybePrepareLiveBridgeFollow(tab);
+    this.ensureLiveBridgeFollowPolling();
     const context = await this.buildProviderWarmupContext(tab, providerId);
 
     switch (context.warmupMode) {
@@ -2020,6 +2037,54 @@ export class TabManager implements TabManagerInterface {
         return;
       default:
         return;
+    }
+  }
+
+  private liveBridgeFollowTimer: number | undefined;
+
+  private ensureLiveBridgeFollowPolling(): void {
+    if (this.liveBridgeFollowTimer !== undefined || !isRemoteRuntime()) return;
+    this.liveBridgeFollowTimer = window.setInterval(() => {
+      if (this.destroyed) {
+        this.stopLiveBridgeFollowPolling();
+        return;
+      }
+      const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : undefined;
+      if (tab) {
+        void this.maybePrepareLiveBridgeFollow(tab);
+      }
+    }, LIVE_BRIDGE_FOLLOW_POLL_INTERVAL_MS);
+  }
+
+  private stopLiveBridgeFollowPolling(): void {
+    if (this.liveBridgeFollowTimer !== undefined) {
+      window.clearInterval(this.liveBridgeFollowTimer);
+      this.liveBridgeFollowTimer = undefined;
+    }
+  }
+
+  /**
+   * Skapar exekveringssessionen för aktiva flikens konversation NÄR dess
+   * session är levande på bryggan — sessionens egen livespegling ansluter
+   * sedan direkt. Opportunistisk: alla fel sväljs, kalla konversationer
+   * lämnas kalla (ingen CLI-process startas i onödan).
+   */
+  private async maybePrepareLiveBridgeFollow(tab: AssembledTabRuntime): Promise<void> {
+    try {
+      if (!isRemoteRuntime() || this.destroyed) return;
+      if (tab.providerId !== 'claude') return;
+      const conversationId = tab.conversationId;
+      if (!conversationId) return;
+      if (tab.executionCoordinator.state === 'disposed') return;
+      const conversation = await this.plugin.getConversationById(conversationId);
+      const sessionId = conversation?.sessionId;
+      if (!sessionId) return;
+      const live = await fetchLiveBridgeSessionIds();
+      if (!live.has(sessionId)) return;
+      if (this.destroyed || tab.id !== this.activeTabId) return;
+      await tab.executionCoordinator.prepare();
+    } catch {
+      // Livespegling är opportunistisk — nästa poll får försöka igen.
     }
   }
 
@@ -2290,6 +2355,7 @@ export class TabManager implements TabManagerInterface {
   beginShutdown(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.stopLiveBridgeFollowPolling();
     this.shutdownSnapshotOpen = true;
     for (const tab of this.tabs.values()) {
       tab.session.pauseIntentAdmission();

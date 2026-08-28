@@ -180,6 +180,29 @@ export function getIgnisBridgeConfig(): IgnisBridgeConfig | null {
 }
 
 /**
+ * Session ids with a live CLI process on the bridge. Empty outside configured
+ * remote runtimes or when the bridge is unreachable — callers treat that as
+ * "nothing to follow", never as an error.
+ */
+export async function fetchLiveBridgeSessionIds(): Promise<Set<string>> {
+  try {
+    if (!isRemoteRuntime() || !isBridgeConfigured()) return new Set();
+    const response = await fetch(resolveBridgeHttpUrl('/sessions'));
+    if (!response.ok) return new Set();
+    const raw = (await response.json()) as {
+      sessions?: Array<{ sessionId?: string | null }>;
+    };
+    return new Set(
+      (raw.sessions ?? [])
+        .map((session) => session.sessionId)
+        .filter((value): value is string => typeof value === 'string' && value.length > 0),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/**
  * Resolves the bridge config, waiting for the in-flight fetch (or starting
  * one) when needed. Returns null outside configured remote runtimes.
  */

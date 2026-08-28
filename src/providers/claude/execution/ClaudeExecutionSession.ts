@@ -36,6 +36,10 @@ import {
   isRemoteControlEnabled,
 } from '../remoteControl/ClaudeRemoteControl';
 import { executeClaudeRewind } from '../runtime/ClaudeRewindService';
+import {
+  fetchLiveBridgeSessionIds,
+  isRemoteRuntime,
+} from '../runtime/remoteSpawn';
 import { getClaudeState } from '../types/providerState';
 import { ClaudeExecutionEventNormalizer } from './ClaudeExecutionEventNormalizer';
 import {
@@ -50,6 +54,9 @@ import {
   ClaudePersistentExecutionStrategy,
 } from './ClaudeExecutionStrategies';
 import { ClaudeInteractionHandler } from './ClaudeInteractionHandler';
+
+/** Gles poll: fångar att en annan enhet väcker sessionen efter att vyn öppnats. */
+const LIVE_FOLLOW_POLL_INTERVAL_MS = 15_000;
 
 interface ActiveRequestedRun {
   readonly executionId: string;
@@ -184,6 +191,53 @@ ClaudeExecutionStrategySink {
     this.strategy = config.lifecycle === 'persistent'
       ? new ClaudePersistentExecutionStrategy(this)
       : new ClaudeEphemeralExecutionStrategy(this);
+
+    // Livespegling i remote-lägen (brygga): har konversationens CLI-process
+    // en levande session på bryggan ansluter vi direkt — då streamas turer
+    // som initieras från ANDRA enheter in som bakgrundsturer och renderas
+    // live här. En gles poll fångar fallet där en annan enhet väcker
+    // sessionen efter att den här vyn öppnats.
+    if (config.lifecycle === 'persistent' && isRemoteRuntime()) {
+      void this.maybeFollowLiveBridgeSession();
+      this.liveFollowTimer = window.setInterval(() => {
+        void this.maybeFollowLiveBridgeSession();
+      }, LIVE_FOLLOW_POLL_INTERVAL_MS);
+    }
+  }
+
+  private liveFollowTimer: number | undefined;
+
+  private stopLiveFollowPolling(): void {
+    if (this.liveFollowTimer !== undefined) {
+      window.clearInterval(this.liveFollowTimer);
+      this.liveFollowTimer = undefined;
+    }
+  }
+
+  /**
+   * Opportunistisk anslutning till en levande brygga-session: öppnar den
+   * persistenta queryn utan att skicka något (samma primitiv som
+   * rewind-förberedelsen). Får aldrig störa sessionen — alla fel sväljs och
+   * ingenting görs när en tur är aktiv eller queryn redan är öppen.
+   */
+  private async maybeFollowLiveBridgeSession(): Promise<void> {
+    try {
+      if (this.disposed || this.activeRun || !this.providerSessionId) return;
+      if (this.strategy.getRewindQuery()) {
+        // Redan ansluten — pollen behövs inte längre.
+        this.stopLiveFollowPolling();
+        return;
+      }
+      const live = await fetchLiveBridgeSessionIds();
+      if (this.disposed || this.activeRun) return;
+      if (!live.has(this.providerSessionId)) return;
+      await this.getOrPrepareRewindQuery();
+      if (this.strategy.getRewindQuery()) {
+        this.stopLiveFollowPolling();
+      }
+    } catch {
+      // Följning är opportunistisk; nästa poll får försöka igen.
+    }
   }
 
   execute(request: ProviderExecutionRequest): ProviderExecutionRun {
@@ -314,6 +368,7 @@ ClaudeExecutionStrategySink {
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
+    this.stopLiveFollowPolling();
     if (this.activeRun) {
       this.cancel();
     }
