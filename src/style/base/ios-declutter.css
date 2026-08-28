@@ -46,3 +46,17 @@ body.is-ios .workspace-drawer-tab-options.is-collapsed {
 body.is-ios .workspace-drawer-tab-options.is-collapsed .workspace-tab-header-inner-title {
   display: none !important;
 }
+
+/*
+ * Egen fil för den svävande knappen: inputkortet lyfts 44 px så knappen
+ * inte täcker YOLO-reglaget/verktygsraden. Nettovinst mot ursprungsläget
+ * (56 px header + 52 px pillrad) är ändå ~64 px chattyta.
+ */
+body.is-ios .claudian-active-input-slot {
+  margin-bottom: 44px !important;
+}
+
+body.is-ios .workspace-drawer-tab-options.is-collapsed {
+  height: 34px !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5px) !important;
+}
