@@ -20,7 +20,8 @@ body.is-ios .workspace-drawer-header {
 }
 
 body.is-ios .workspace-drawer-tab-options.is-collapsed {
-  transform: scale(0.66) !important;
+  transform: scale(0.6) !important;
   transform-origin: bottom center !important;
-  margin-top: -18px !important;
+  margin-top: -21px !important;   /* återta skalslacket (52 → ~31 px visuellt) */
+  margin-bottom: -14px !important; /* sänk pillen in i safe-area-luften */
 }
