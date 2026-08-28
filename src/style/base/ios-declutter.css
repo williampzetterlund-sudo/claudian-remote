@@ -23,5 +23,19 @@ body.is-ios .workspace-drawer-tab-options.is-collapsed {
   transform: scale(0.6) !important;
   transform-origin: bottom center !important;
   margin-top: -21px !important;   /* återta skalslacket (52 → ~31 px visuellt) */
-  margin-bottom: -14px !important; /* sänk pillen in i safe-area-luften */
+  margin-bottom: -6px !important;
+}
+
+/*
+ * Uppmätt (doctor 1.4.0): .workspace-drawer-inner har 34 px bottenpadding
+ * (safe-arean — hemindikatorn tål innehåll, 12 px räcker) och vyinnehållet
+ * bär en reserverad klarering under inputfoten från den ursprungliga
+ * pillraden. Båda trimmas så chatten når nästan ända ner.
+ */
+body.is-ios .workspace-drawer-inner {
+  padding-bottom: 12px !important;
+}
+
+body.is-ios .workspace-drawer .view-content {
+  padding-bottom: 0 !important;
 }
