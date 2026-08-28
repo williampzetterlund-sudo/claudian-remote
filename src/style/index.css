@@ -70,5 +70,8 @@
 /* Accessibility */
 @import "./accessibility.css";
 
+/* iOS declutter (WZE fork): hide the floating status-bar pill in the iOS apps */
+@import "./base/ios-declutter.css";
+
 /* Utilities imported last to preserve cascade priority without importance flags */
 @import "./base/visibility.css";

@@ -1,0 +1,11 @@
+/*
+ * iOS declutter (WZE-forken): Obsidian på iPhone/iPad renderar statusfältet
+ * som en svävande pill nere till höger (ordräknare, LiveSync-/Todoist-status
+ * m.m.) som ligger ovanpå Claudians chattyta och stjäl plats. Den göms här —
+ * ENBART i iOS-apparna. `is-ios` sätts inte i Ignis (Chromium/desktop-webb)
+ * eller i desktop-appen, så deras statusfält är orörda. Fel från andra
+ * plugins syns fortfarande som Notices.
+ */
+body.is-ios .status-bar {
+  display: none !important;
+}
