@@ -1,11 +1,17 @@
 /*
- * iOS declutter (WZE-forken): Obsidian på iPhone/iPad renderar statusfältet
- * som en svävande pill nere till höger (ordräknare, LiveSync-/Todoist-status
- * m.m.) som ligger ovanpå Claudians chattyta och stjäl plats. Den göms här —
- * ENBART i iOS-apparna. `is-ios` sätts inte i Ignis (Chromium/desktop-webb)
- * eller i desktop-appen, så deras statusfält är orörda. Fel från andra
- * plugins syns fortfarande som Notices.
+ * iOS declutter (WZE-forken): göm bottenklungan i iOS-apparna.
+ * Verifierat mot DOM-dump från iPhone (claudian-doctor 1.3.0, 2026-08-28):
+ *  - .workspace-drawer-header — filnamn + ordräknare i mobil-drawern
+ *    ("Rapport — 806 words, 12,020 characters"), 56 px informationsyta
+ *  - .status-bar — statusfälts-pillen (förekommer på iPad)
+ * Vyväxlar-pillen (.workspace-drawer-tab-options) behålls: den är
+ * navigationen mellan panelvyer. `is-ios` sätts bara i iOS-apparna —
+ * Ignis och desktop orörda.
  */
 body.is-ios .status-bar {
+  display: none !important;
+}
+
+body.is-ios .workspace-drawer-header {
   display: none !important;
 }
